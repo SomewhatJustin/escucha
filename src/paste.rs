@@ -235,9 +235,12 @@ fn clipboard_paste_ydotool(text: &str, hotkey: &str, delay_ms: u32) -> Result<()
     std::thread::sleep(std::time::Duration::from_millis(delay_ms as u64));
 
     // Simulate paste hotkey with ydotool
-    let keys = parse_hotkey_to_ydotool(hotkey);
+    // Format: ydotool key KEYCODE:1 KEYCODE:1 KEYCODE:0 KEYCODE:0
+    // where :1 = press, :0 = release
+    let args = parse_hotkey_to_ydotool(hotkey);
     let status = Command::new("ydotool")
-        .args(["key", &keys.join(":")])
+        .arg("key")
+        .args(&args)
         .status()
         .context("Failed to simulate paste with ydotool")?;
 
@@ -288,30 +291,49 @@ fn parse_hotkey_to_wtype(hotkey: &str) -> Vec<String> {
     args
 }
 
-/// Parse a hotkey like "ctrl+v" to ydotool key codes.
-/// ydotool format: "29:47" means Ctrl(29) down, V(47) press, then release in reverse order
+/// Map a key name to a Linux evdev key code for ydotool.
+fn key_name_to_code(name: &str) -> Option<&'static str> {
+    match name.to_lowercase().as_str() {
+        "ctrl" => Some("29"),        // KEY_LEFTCTRL
+        "shift" => Some("42"),       // KEY_LEFTSHIFT
+        "alt" => Some("56"),         // KEY_LEFTALT
+        "super" | "meta" => Some("125"), // KEY_LEFTMETA
+        "v" => Some("47"),           // KEY_V
+        "c" => Some("46"),           // KEY_C
+        "a" => Some("30"),           // KEY_A
+        "z" => Some("44"),           // KEY_Z
+        _ => None,
+    }
+}
+
+/// Parse a hotkey like "ctrl+v" to ydotool key arguments.
+/// ydotool format: each arg is KEYCODE:STATE where 1=press, 0=release.
+/// For ctrl+v: "29:1" "47:1" "47:0" "29:0"
 fn parse_hotkey_to_ydotool(hotkey: &str) -> Vec<String> {
     let parts: Vec<&str> = hotkey.split('+').collect();
-    let mut keys = Vec::new();
+    let mut codes: Vec<&str> = Vec::new();
 
-    // Map modifier and key names to ydotool key codes
-    for part in parts.iter() {
-        let lowered = part.to_lowercase();
-        let keycode = match lowered.as_str() {
-            "ctrl" => "29",       // KEY_LEFTCTRL
-            "shift" => "42",      // KEY_LEFTSHIFT
-            "alt" => "56",        // KEY_LEFTALT
-            "super" | "meta" => "125", // KEY_LEFTMETA
-            "v" => "47",          // KEY_V
-            _ => {
-                log::warn!("Unknown key in hotkey: {}", part);
-                continue;
-            }
-        };
-        keys.push(keycode.to_string());
+    for part in &parts {
+        if let Some(code) = key_name_to_code(part) {
+            codes.push(code);
+        } else {
+            log::warn!("Unknown key in hotkey: {}", part);
+        }
     }
 
-    keys
+    let mut args = Vec::new();
+
+    // Press all keys in order
+    for code in &codes {
+        args.push(format!("{code}:1"));
+    }
+
+    // Release all keys in reverse order
+    for code in codes.iter().rev() {
+        args.push(format!("{code}:0"));
+    }
+
+    args
 }
 
 #[cfg(test)]
@@ -335,9 +357,19 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_hotkey_to_ydotool() {
-        let keys = parse_hotkey_to_ydotool("ctrl+v");
-        assert_eq!(keys, vec!["29", "47"]); // Ctrl, V
+    fn test_parse_hotkey_to_ydotool_ctrl_v() {
+        let args = parse_hotkey_to_ydotool("ctrl+v");
+        // Press Ctrl, press V, release V, release Ctrl
+        assert_eq!(args, vec!["29:1", "47:1", "47:0", "29:0"]);
+    }
+
+    #[test]
+    fn test_parse_hotkey_to_ydotool_ctrl_shift_v() {
+        let args = parse_hotkey_to_ydotool("ctrl+shift+v");
+        assert_eq!(
+            args,
+            vec!["29:1", "42:1", "47:1", "47:0", "42:0", "29:0"]
+        );
     }
 
     #[test]
