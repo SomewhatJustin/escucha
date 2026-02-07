@@ -44,18 +44,26 @@ sudo pacman -S --needed rust alsa-utils gtk4 libadwaita \
 
 ## Build & Install
 
+### Quick install (installs dependencies automatically)
+
 ```bash
 git clone https://github.com/somewhatjustin/escucha.git
 cd escucha
-cargo build --release
-
-# Install to ~/.local/bin
-sudo make install
+./install.sh
 ```
 
-Or use the system package manager install target:
+The installer will:
+- Check for and install missing dependencies (`wtype`, `wl-clipboard`, `alsa-utils`, etc.)
+- Build the release binary
+- Install to `~/.local/bin/escucha`
+- Install systemd service
+- Optionally add you to the `input` group
+
+### Manual install
+
 ```bash
-sudo make install-system
+cargo build --release
+make install
 ```
 
 ### Input permissions
