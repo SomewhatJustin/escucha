@@ -54,10 +54,11 @@ cd escucha
 ```
 
 The installer will:
-- Check for and install missing dependencies (`wtype`, `wl-clipboard`, `alsa-utils`, etc.)
+- Check for and install missing dependencies (`ydotool`, `wl-clipboard`, `alsa-utils`, etc.)
+- Start the `ydotoold` daemon (required for ydotool)
 - Build the release binary
 - Install to `~/.local/bin/escucha`
-- Install systemd service
+- Install systemd services (escucha + ydotoold)
 - Optionally add you to the `input` group
 
 ### Manual install
@@ -167,15 +168,21 @@ English-only models (`*.en`) are faster and more accurate for English.
 
 ## Wayland notes
 
-**For KDE Plasma:** Use `ydotool` which works via `/dev/uinput`:
+**ydotool daemon:** The `ydotool` paste method requires the `ydotoold` daemon to be running. The installer automatically sets this up as a systemd user service.
 
+If you installed manually, start it with:
 ```bash
-sudo dnf install -y ydotool
+systemctl --user enable --now ydotoold.service
 ```
 
-The app will auto-detect and prefer ydotool on Wayland.
+Or run it manually:
+```bash
+ydotoold &
+```
 
-**For GNOME/other compositors:** `wtype` requires virtual keyboard protocol support. If not available, the app falls back to clipboard-only mode (`wl-copy`).
+**For compositors without virtual keyboard support (KDE, GNOME):** The app uses `ydotool` which works universally via `/dev/uinput`.
+
+**For compositors with virtual keyboard support (Sway, Hyprland):** Both `wtype` and `ydotool` work.
 
 ## Troubleshooting
 

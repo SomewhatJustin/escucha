@@ -88,7 +88,7 @@ mkdir -p "$SYSTEMD_DIR"
 cat > "$SYSTEMD_DIR/escucha.service" <<EOF
 [Unit]
 Description=Escucha speech-to-text service
-After=graphical-session.target
+After=graphical-session.target ydotoold.service
 
 [Service]
 Type=simple
@@ -99,6 +99,31 @@ RestartSec=5
 [Install]
 WantedBy=default.target
 EOF
+
+# Set up ydotoold service if ydotool is installed
+if command -v ydotool &> /dev/null; then
+    echo "==> Setting up ydotoold daemon service..."
+    cat > "$SYSTEMD_DIR/ydotoold.service" <<EOF
+[Unit]
+Description=ydotool daemon for input automation
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=$(which ydotoold)
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+    systemctl --user daemon-reload
+    systemctl --user enable ydotoold.service
+    systemctl --user start ydotoold.service
+
+    echo "ydotoold service installed and started"
+fi
 
 echo "==> Checking input group permissions..."
 if ! groups | grep -q "\binput\b"; then
