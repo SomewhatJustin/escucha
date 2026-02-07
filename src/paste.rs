@@ -215,7 +215,8 @@ fn clipboard_paste_wayland(text: &str, hotkey: &str, delay_ms: u32) -> Result<()
         .context("Failed to simulate paste with wtype")?;
 
     if !status.success() {
-        bail!("wtype key failed");
+        log::warn!("wtype key simulation failed (compositor may not support virtual keyboard). Text copied to clipboard - paste manually with Ctrl+V");
+        return Ok(()); // Don't fail - clipboard copy succeeded
     }
     Ok(())
 }
