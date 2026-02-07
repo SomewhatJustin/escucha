@@ -31,11 +31,14 @@ check_command "arecord" "alsa-utils"
 check_command "wl-copy" "wl-clipboard"
 
 # Check for paste tool (prefer ydotool for KDE compatibility)
-if ! command -v ydotool &> /dev/null && ! command -v wtype &> /dev/null; then
-    # Detect if KDE to recommend ydotool
-    if [ "$XDG_CURRENT_DESKTOP" = "KDE" ]; then
+if [ "$XDG_CURRENT_DESKTOP" = "KDE" ]; then
+    # KDE requires ydotool (wtype doesn't work due to lack of virtual keyboard support)
+    if ! command -v ydotool &> /dev/null; then
         MISSING_DEPS+=("ydotool")
-    else
+    fi
+else
+    # Other compositors: prefer wtype, fall back to ydotool
+    if ! command -v wtype &> /dev/null && ! command -v ydotool &> /dev/null; then
         MISSING_DEPS+=("wtype")
     fi
 fi
