@@ -5,6 +5,7 @@ use std::process::Command;
 pub enum PasteMethod {
     Xdotool,
     Wtype,
+    Ydotool,
     WlCopy,
 }
 
@@ -13,6 +14,7 @@ impl PasteMethod {
         match self {
             PasteMethod::Xdotool => "xdotool",
             PasteMethod::Wtype => "wtype",
+            PasteMethod::Ydotool => "ydotool",
             PasteMethod::WlCopy => "wl-copy",
         }
     }
@@ -37,6 +39,7 @@ pub fn pick_paste_method(setting: &str) -> Result<PasteMethod> {
     match setting {
         "xdotool" => return Ok(PasteMethod::Xdotool),
         "wtype" => return Ok(PasteMethod::Wtype),
+        "ydotool" => return Ok(PasteMethod::Ydotool),
         "wl-copy" => return Ok(PasteMethod::WlCopy),
         _ => {}
     }
@@ -45,13 +48,18 @@ pub fn pick_paste_method(setting: &str) -> Result<PasteMethod> {
     let is_x11 = std::env::var("DISPLAY").is_ok();
 
     if is_wayland {
+        // Prefer ydotool (works on all compositors including KDE)
+        if is_available("ydotool") {
+            return Ok(PasteMethod::Ydotool);
+        }
+        // wtype only works on compositors that support virtual keyboard
         if is_available("wtype") {
             return Ok(PasteMethod::Wtype);
         }
         if is_available("wl-copy") {
             log::warn!(
-                "wtype not found; falling back to wl-copy (clipboard only). \
-                 Install wtype for automatic pasting."
+                "ydotool/wtype not found; falling back to wl-copy (clipboard only). \
+                 Install ydotool for automatic pasting."
             );
             return Ok(PasteMethod::WlCopy);
         }
@@ -61,7 +69,7 @@ pub fn pick_paste_method(setting: &str) -> Result<PasteMethod> {
         return Ok(PasteMethod::Xdotool);
     }
 
-    bail!("No paste tool found. Install wtype + wl-copy (Wayland) or xdotool (X11).")
+    bail!("No paste tool found. Install ydotool + wl-copy (Wayland) or xdotool (X11).")
 }
 
 fn is_available(cmd: &str) -> bool {
@@ -73,6 +81,7 @@ pub fn paste_text(text: &str, config: &PasteConfig) -> Result<()> {
     match config.method {
         PasteMethod::Xdotool => paste_xdotool(text, config),
         PasteMethod::Wtype => paste_wtype(text, config),
+        PasteMethod::Ydotool => paste_ydotool(text, config),
         PasteMethod::WlCopy => paste_wl_copy_only(text),
     }
 }
@@ -107,6 +116,26 @@ fn paste_wtype(text: &str, config: &PasteConfig) -> Result<()> {
             // Fallback to clipboard paste
             log::warn!("wtype direct typing failed, falling back to clipboard paste");
             clipboard_paste_wayland(text, &config.hotkey, config.clipboard_paste_delay_ms)
+        } else {
+            Ok(())
+        }
+    }
+}
+
+fn paste_ydotool(text: &str, config: &PasteConfig) -> Result<()> {
+    if should_use_clipboard(&config.clipboard_paste) {
+        clipboard_paste_ydotool(text, &config.hotkey, config.clipboard_paste_delay_ms)
+    } else {
+        // Direct typing with ydotool
+        let status = Command::new("ydotool")
+            .args(["type", text])
+            .status()
+            .context("Failed to run ydotool")?;
+
+        if !status.success() {
+            // Fallback to clipboard paste
+            log::warn!("ydotool direct typing failed, falling back to clipboard paste");
+            clipboard_paste_ydotool(text, &config.hotkey, config.clipboard_paste_delay_ms)
         } else {
             Ok(())
         }
@@ -191,6 +220,32 @@ fn clipboard_paste_wayland(text: &str, hotkey: &str, delay_ms: u32) -> Result<()
     Ok(())
 }
 
+fn clipboard_paste_ydotool(text: &str, hotkey: &str, delay_ms: u32) -> Result<()> {
+    // Copy to clipboard using wl-copy
+    let status = Command::new("wl-copy")
+        .arg(text)
+        .status()
+        .context("Failed to copy to clipboard with wl-copy")?;
+
+    if !status.success() {
+        bail!("wl-copy failed");
+    }
+
+    std::thread::sleep(std::time::Duration::from_millis(delay_ms as u64));
+
+    // Simulate paste hotkey with ydotool
+    let keys = parse_hotkey_to_ydotool(hotkey);
+    let status = Command::new("ydotool")
+        .args(["key", &keys.join(":")])
+        .status()
+        .context("Failed to simulate paste with ydotool")?;
+
+    if !status.success() {
+        bail!("ydotool key failed");
+    }
+    Ok(())
+}
+
 /// Parse a hotkey like "ctrl+v" or "ctrl+shift+v" to wtype args.
 fn parse_hotkey_to_wtype(hotkey: &str) -> Vec<String> {
     let mut args = Vec::new();
@@ -232,6 +287,32 @@ fn parse_hotkey_to_wtype(hotkey: &str) -> Vec<String> {
     args
 }
 
+/// Parse a hotkey like "ctrl+v" to ydotool key codes.
+/// ydotool format: "29:47" means Ctrl(29) down, V(47) press, then release in reverse order
+fn parse_hotkey_to_ydotool(hotkey: &str) -> Vec<String> {
+    let parts: Vec<&str> = hotkey.split('+').collect();
+    let mut keys = Vec::new();
+
+    // Map modifier and key names to ydotool key codes
+    for part in parts.iter() {
+        let lowered = part.to_lowercase();
+        let keycode = match lowered.as_str() {
+            "ctrl" => "29",       // KEY_LEFTCTRL
+            "shift" => "42",      // KEY_LEFTSHIFT
+            "alt" => "56",        // KEY_LEFTALT
+            "super" | "meta" => "125", // KEY_LEFTMETA
+            "v" => "47",          // KEY_V
+            _ => {
+                log::warn!("Unknown key in hotkey: {}", part);
+                continue;
+            }
+        };
+        keys.push(keycode.to_string());
+    }
+
+    keys
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,6 +321,7 @@ mod tests {
     fn test_paste_method_display() {
         assert_eq!(PasteMethod::Xdotool.to_string(), "xdotool");
         assert_eq!(PasteMethod::Wtype.to_string(), "wtype");
+        assert_eq!(PasteMethod::Ydotool.to_string(), "ydotool");
         assert_eq!(PasteMethod::WlCopy.to_string(), "wl-copy");
     }
 
@@ -247,7 +329,14 @@ mod tests {
     fn test_pick_paste_method_explicit() {
         assert_eq!(pick_paste_method("xdotool").unwrap(), PasteMethod::Xdotool);
         assert_eq!(pick_paste_method("wtype").unwrap(), PasteMethod::Wtype);
+        assert_eq!(pick_paste_method("ydotool").unwrap(), PasteMethod::Ydotool);
         assert_eq!(pick_paste_method("wl-copy").unwrap(), PasteMethod::WlCopy);
+    }
+
+    #[test]
+    fn test_parse_hotkey_to_ydotool() {
+        let keys = parse_hotkey_to_ydotool("ctrl+v");
+        assert_eq!(keys, vec!["29", "47"]); // Ctrl, V
     }
 
     #[test]

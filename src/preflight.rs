@@ -178,6 +178,15 @@ fn check_paste_tool() -> CheckResult {
     let is_x11 = std::env::var("DISPLAY").is_ok();
 
     if is_wayland {
+        if which::which("ydotool").is_ok() {
+            return CheckResult {
+                name,
+                passed: true,
+                severity: CheckSeverity::Critical,
+                message: "ydotool available (Wayland)".into(),
+                hint: None,
+            };
+        }
         if which::which("wtype").is_ok() {
             return CheckResult {
                 name,
@@ -193,7 +202,7 @@ fn check_paste_tool() -> CheckResult {
                 passed: true,
                 severity: CheckSeverity::Warning,
                 message: "wl-copy available (clipboard only, no auto-paste)".into(),
-                hint: Some("Install wtype for automatic pasting".into()),
+                hint: Some("Install ydotool or wtype for automatic pasting".into()),
             };
         }
     }
@@ -225,7 +234,7 @@ fn check_paste_tool() -> CheckResult {
         severity: CheckSeverity::Critical,
         message: "No paste tool found".into(),
         hint: Some(if is_wayland {
-            "Install wtype and wl-clipboard".into()
+            "Install ydotool and wl-clipboard".into()
         } else {
             "Install xdotool".into()
         }),

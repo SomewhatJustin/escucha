@@ -17,7 +17,8 @@ What it does:
 
 **Paste tool (one required):**
 - X11: `xdotool` + `xclip`
-- Wayland: `wtype` + `wl-clipboard`
+- Wayland: `ydotool` + `wl-clipboard` (works on all compositors including KDE)
+- Wayland (alternative): `wtype` + `wl-clipboard` (for compositors with virtual keyboard support)
 
 **Optional:**
 - GTK4 + libadwaita (for troubleshooting GUI)
@@ -27,19 +28,19 @@ What it does:
 **Fedora:**
 ```bash
 sudo dnf install -y rust cargo alsa-utils gtk4-devel libadwaita-devel \
-  wl-clipboard wtype xdotool xclip
+  wl-clipboard ydotool xdotool xclip
 ```
 
 **Ubuntu/Debian:**
 ```bash
 sudo apt install -y cargo rustc alsa-utils libgtk-4-dev libadwaita-1-dev \
-  wl-clipboard wtype xdotool xclip
+  wl-clipboard ydotool xdotool xclip
 ```
 
 **Arch:**
 ```bash
 sudo pacman -S --needed rust alsa-utils gtk4 libadwaita \
-  wl-clipboard wtype xdotool xclip
+  wl-clipboard ydotool xdotool xclip
 ```
 
 ## Build & Install
@@ -133,7 +134,7 @@ log_level = info
 - `keyboard_device`: `auto` or specific `/dev/input/eventX`
 - `model`: Whisper model name (`tiny.en`, `base.en`, `small.en`, `medium.en`, `large`)
 - `language`: Language code (`en`, `es`, `fr`, `de`, etc.)
-- `paste_method`: `auto`, `xdotool`, `wtype`, or `wl-copy`
+- `paste_method`: `auto`, `xdotool`, `ydotool`, `wtype`, or `wl-copy`
 - `paste_hotkey`: Keyboard shortcut for clipboard paste (`ctrl+v`, `ctrl+shift+v`)
 - `clipboard_paste`: `auto`, `on`, or `off` (auto uses clipboard on Wayland)
 - `clipboard_paste_delay_ms`: Delay between clipboard copy and paste simulation
@@ -166,15 +167,15 @@ English-only models (`*.en`) are faster and more accurate for English.
 
 ## Wayland notes
 
-**GNOME Wayland** does not support the virtual keyboard protocol, so `wtype` won't work. Use clipboard paste:
+**For KDE Plasma:** Use `ydotool` which works via `/dev/uinput`:
 
-```ini
-paste_method = wl-copy
+```bash
+sudo dnf install -y ydotool
 ```
 
-This copies to clipboard only - you'll need to paste manually with Ctrl+V.
+The app will auto-detect and prefer ydotool on Wayland.
 
-For automatic pasting on Wayland, use a compositor that supports virtual keyboard (Sway, Hyprland, KDE Plasma).
+**For GNOME/other compositors:** `wtype` requires virtual keyboard protocol support. If not available, the app falls back to clipboard-only mode (`wl-copy`).
 
 ## Troubleshooting
 
@@ -188,7 +189,8 @@ For automatic pasting on Wayland, use a compositor that supports virtual keyboar
 
 **"No paste tool found"**
 - X11: Install `xdotool` and `xclip`
-- Wayland: Install `wtype` and `wl-clipboard`
+- Wayland (KDE/most compositors): Install `ydotool` and `wl-clipboard`
+- Wayland (Sway/Hyprland): Install `wtype` and `wl-clipboard`
 
 **Key not detected**
 - Run `escucha --list-devices` to verify input access
@@ -197,7 +199,8 @@ For automatic pasting on Wayland, use a compositor that supports virtual keyboar
 
 **Paste fails**
 - X11: Check that `xdotool` and `xclip` work: `echo "test" | xclip -selection clipboard && xdotool key ctrl+v`
-- Wayland: Check that `wtype` and `wl-copy` work: `echo "test" | wl-copy && wtype -M ctrl -k v -m ctrl`
+- Wayland (ydotool): Check that `ydotool` and `wl-copy` work: `echo "test" | wl-copy && ydotool key 29:47`
+- Wayland (wtype): Check that `wtype` and `wl-copy` work: `echo "test" | wl-copy && wtype -M ctrl -k v -m ctrl`
 - Try increasing `clipboard_paste_delay_ms` in config
 
 **Model download fails**

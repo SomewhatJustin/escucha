@@ -14,7 +14,7 @@ BuildRequires:  libadwaita-devel
 
 Requires:       alsa-utils
 Requires:       wl-clipboard
-Requires:       wtype
+Requires:       ydotool
 Requires:       gtk4
 Requires:       libadwaita
 

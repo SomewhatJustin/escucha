@@ -28,8 +28,17 @@ check_command() {
 
 check_command "cargo" "rust cargo"
 check_command "arecord" "alsa-utils"
-check_command "wtype" "wtype"
 check_command "wl-copy" "wl-clipboard"
+
+# Check for paste tool (prefer ydotool for KDE compatibility)
+if ! command -v ydotool &> /dev/null && ! command -v wtype &> /dev/null; then
+    # Detect if KDE to recommend ydotool
+    if [ "$XDG_CURRENT_DESKTOP" = "KDE" ]; then
+        MISSING_DEPS+=("ydotool")
+    else
+        MISSING_DEPS+=("wtype")
+    fi
+fi
 
 if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
     echo "Missing dependencies: ${MISSING_DEPS[*]}"
