@@ -47,10 +47,11 @@ src/
 
 ### Paste Methods (`paste.rs`)
 
+- **ydotool**: Wayland clipboard paste via wl-copy + ydotool key simulation (works on all compositors)
 - **xdotool**: X11 direct typing or clipboard paste with xclip
-- **wtype**: Wayland direct typing or clipboard paste with wl-copy
-- **wl-copy**: Clipboard-only (no auto-paste) for GNOME Wayland
-- Auto-detects display server and available tools
+- **wtype**: Wayland direct typing or clipboard paste with wl-copy (requires virtual keyboard protocol)
+- **wl-copy**: Clipboard-only (no auto-paste) fallback
+- Auto-detection priority on Wayland: ydotool > wtype > wl-copy
 
 ## Config File
 
@@ -135,8 +136,9 @@ Test coverage:
 
 **System tools:**
 - `arecord`: Audio recording (from alsa-utils)
+- `ydotool` + `ydotoold`: Wayland key simulation (preferred, works on KDE/GNOME/all)
 - `xdotool` + `xclip`: X11 text pasting
-- `wtype` + `wl-copy`: Wayland text pasting
+- `wtype` + `wl-copy`: Wayland text pasting (only Sway/Hyprland, NOT KDE/GNOME)
 - `curl`: Model downloads from Hugging Face
 - `pkexec`: Permission elevation for group changes
 - `sg`: Group activation without logout
@@ -193,3 +195,21 @@ cargo watch -x "clippy -- -D warnings"
 5. **Signal handling**: Daemon mode sets up SIGTERM/SIGINT handlers. GUI uses window close event for cleanup.
 
 6. **Group membership caching**: Linux caches group membership at login. `sg` command activates group for child process tree without full logout.
+
+## CRITICAL: ydotool key format
+
+**NEVER use `ydotool key CODE1:CODE2` format.** This will press a key and never release it, locking up the user's desktop.
+
+The correct ydotool key format uses separate arguments with explicit press (`:1`) and release (`:0`) states:
+
+```
+ydotool key 29:1 47:1 47:0 29:0
+         Ctrl↓  V↓   V↑  Ctrl↑
+```
+
+- Each argument is `KEYCODE:STATE` where `1` = press, `0` = release
+- Press all keys in order, then release in reverse order
+- The `parse_hotkey_to_ydotool()` function in `paste.rs` handles this
+- **ydotoold daemon must be running** - the installer sets it up as a systemd user service
+- Default socket path: `/run/user/$UID/.ydotool_socket`
+- Common key codes: Ctrl=29, Shift=42, Alt=56, V=47, C=46
