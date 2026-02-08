@@ -15,13 +15,31 @@ struct Cli {
     /// Run environment checks and print a diagnostic report
     #[arg(long)]
     check: bool,
+
+    /// Run structured diagnostics and print JSON output
+    #[arg(long)]
+    diagnose: bool,
+
+    /// Run headless smoke test flow and print JSON output
+    #[arg(long)]
+    smoke_test: bool,
 }
 
 fn main() -> Result<()> {
     env_logger::init();
     let cli = Cli::parse();
 
-    if cli.check {
+    if cli.diagnose {
+        let ok = escucha::diagnostics::run_and_print("diagnose", false)?;
+        if !ok {
+            std::process::exit(1);
+        }
+    } else if cli.smoke_test {
+        let ok = escucha::diagnostics::run_and_print("smoke-test", true)?;
+        if !ok {
+            std::process::exit(1);
+        }
+    } else if cli.check {
         let report = escucha::preflight::check_environment();
         print!("{report}");
         if report.has_critical_failures() {

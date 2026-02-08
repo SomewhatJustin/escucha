@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod bridge;
 pub mod config;
+pub mod diagnostics;
 pub mod gui;
 mod gui_bridge;
 pub mod input;

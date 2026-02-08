@@ -631,7 +631,7 @@ dependencies = [
 
 [[package]]
 name = "escucha"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "anyhow",
  "clap",
@@ -648,6 +648,8 @@ dependencies = [
  "log",
  "nix 0.29.0",
  "rust-ini",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "which",

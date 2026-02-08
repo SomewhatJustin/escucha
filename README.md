@@ -109,6 +109,26 @@ escucha --check
 
 This validates input device access, arecord, paste tools, and directories.
 
+### Structured diagnostics (JSON)
+
+For automation and CI-style debugging loops:
+
+```bash
+escucha --diagnose
+```
+
+Prints a structured JSON report and exits `0`/`1`.
+
+### Headless smoke test
+
+Runs a non-interactive startup/audio smoke test and prints JSON:
+
+```bash
+escucha --smoke-test
+```
+
+This is intended for repeatable machine-driven iteration (run, parse, patch, rerun).
+
 ### Run as daemon (default)
 
 ```bash
@@ -251,6 +271,15 @@ RUST_LOG=debug cargo run -- --gui
 
 # Check environment
 cargo run -- --check
+
+# Structured diagnostics JSON
+cargo run -- --diagnose
+
+# Headless smoke test JSON
+cargo run -- --smoke-test
+
+# One-command closed loop
+./scripts/diagnostics-loop.sh
 ```
 
 ## AUR Maintainer Notes

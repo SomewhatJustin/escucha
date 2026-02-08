@@ -1,6 +1,6 @@
 use anyhow::{Context, Result, bail};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PasteMethod {
@@ -97,19 +97,24 @@ pub fn ensure_ydotoold_running() -> bool {
     }
 
     // First-run friendly path: persistently enable and start the user service.
-    let started = Command::new("systemctl")
-        .args(["--user", "enable", "--now", "ydotoold.service"])
-        .status()
-        .is_ok_and(|s| s.success());
+    let started = run_systemctl_user(["enable", "--now", "ydotoold.service"]);
     if !started {
         // Fallback to a plain start for environments where enable is restricted.
-        let _ = Command::new("systemctl")
-            .args(["--user", "start", "ydotoold.service"])
-            .status();
+        let _ = run_systemctl_user(["start", "ydotoold.service"]);
     }
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     ydotool_socket_available()
+}
+
+fn run_systemctl_user<const N: usize>(args: [&str; N]) -> bool {
+    Command::new("systemctl")
+        .arg("--user")
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 /// Paste text using the configured method.
