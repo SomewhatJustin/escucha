@@ -1,0 +1,407 @@
+#[cxx_qt::bridge]
+pub mod qobject {
+    unsafe extern "C++" {
+        include!("cxx-qt-lib/qstring.h");
+        type QString = cxx_qt_lib::QString;
+    }
+
+    #[auto_cxx_name]
+    extern "RustQt" {
+        #[qobject]
+        #[qml_element]
+        #[qproperty(QString, status_text)]
+        #[qproperty(QString, status_detail)]
+        #[qproperty(QString, device_name)]
+        #[qproperty(QString, transcription)]
+        #[qproperty(QString, status_icon_name)]
+        #[qproperty(bool, show_spinner)]
+        #[qproperty(bool, show_fix_button)]
+        #[qproperty(bool, is_recording)]
+        #[qproperty(bool, is_stopped)]
+        #[qproperty(bool, is_ready)]
+        type EscuchaBackend = super::EscuchaBackendRust;
+
+        #[qinvokable]
+        fn fix_permissions(self: Pin<&mut EscuchaBackend>);
+
+        #[qinvokable]
+        fn request_shutdown(self: Pin<&mut EscuchaBackend>);
+
+        #[qsignal]
+        fn error_occurred(self: Pin<&mut EscuchaBackend>, message: QString);
+    }
+
+    impl cxx_qt::Threading for EscuchaBackend {}
+    impl cxx_qt::Initialize for EscuchaBackend {}
+}
+
+use core::pin::Pin;
+use cxx_qt::{CxxQtType, Threading};
+use cxx_qt_lib::QString;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::config;
+use crate::service::{ServiceCallbacks, ServiceStatus};
+
+/// Strip "/dev/input/eventN - " prefix, show only the human-readable name.
+pub fn strip_device_prefix(label: &str) -> &str {
+    if let Some(pos) = label.find(" - ") {
+        &label[pos + 3..]
+    } else {
+        label
+    }
+}
+
+/// Restart the application by re-executing itself with the new group membership active.
+fn restart_app() {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("escucha"));
+    let args: Vec<String> = std::env::args().collect();
+
+    let mut cmd_parts = vec![exe.to_string_lossy().to_string()];
+    cmd_parts.extend(args[1..].iter().map(|s| s.to_string()));
+    let full_cmd = cmd_parts.join(" ");
+
+    let success = std::process::Command::new("sg")
+        .args(["input", "-c", &full_cmd])
+        .spawn()
+        .is_ok();
+
+    if !success {
+        let _ = std::process::Command::new(&exe).args(&args[1..]).spawn();
+    }
+
+    std::process::exit(0);
+}
+
+#[derive(Default)]
+pub struct EscuchaBackendRust {
+    status_text: QString,
+    status_detail: QString,
+    device_name: QString,
+    transcription: QString,
+    status_icon_name: QString,
+    show_spinner: bool,
+    show_fix_button: bool,
+    is_recording: bool,
+    is_stopped: bool,
+    is_ready: bool,
+    shutdown_flag: Option<Arc<AtomicBool>>,
+}
+
+impl qobject::EscuchaBackend {
+    pub fn fix_permissions(self: Pin<&mut Self>) {
+        let user = std::env::var("USER").unwrap_or_default();
+        if user.is_empty() {
+            self.error_occurred(QString::from("Could not determine current username"));
+            return;
+        }
+
+        let qt_thread = self.qt_thread();
+        std::thread::spawn(move || {
+            let ok = std::process::Command::new("pkexec")
+                .args(["usermod", "-aG", "input", &user])
+                .status()
+                .is_ok_and(|s| s.success());
+
+            if ok {
+                let has_sg = which::which("sg").is_ok();
+                let _ = qt_thread.queue(move |mut qobject| {
+                    qobject.as_mut().set_show_fix_button(false);
+                    if has_sg {
+                        qobject
+                            .as_mut()
+                            .set_status_detail(QString::from(
+                                "Permissions granted \u{2014} restarting with new group...",
+                            ));
+                    } else {
+                        qobject
+                            .as_mut()
+                            .set_status_detail(QString::from(
+                                "Permissions granted \u{2014} log out and back in to apply",
+                            ));
+                    }
+                });
+
+                if has_sg {
+                    std::thread::sleep(std::time::Duration::from_secs(2));
+                    restart_app();
+                }
+            } else {
+                let _ = qt_thread.queue(move |mut qobject| {
+                    qobject.as_mut().error_occurred(QString::from(
+                        "Permission request denied or failed",
+                    ));
+                });
+            }
+        });
+    }
+
+    pub fn request_shutdown(self: Pin<&mut Self>) {
+        if let Some(flag) = &self.rust().shutdown_flag {
+            flag.store(true, Ordering::Relaxed);
+        }
+    }
+}
+
+impl cxx_qt::Initialize for qobject::EscuchaBackend {
+    fn initialize(mut self: Pin<&mut Self>) {
+        self.as_mut()
+            .set_status_text(QString::from("Starting..."));
+        self.as_mut()
+            .set_status_icon_name(QString::from("audio-input-microphone-symbolic"));
+        self.as_mut().set_show_spinner(true);
+        self.as_mut()
+            .set_transcription(QString::from("Hold Right Ctrl and speak..."));
+
+        let qt_thread = self.qt_thread();
+        std::thread::spawn(move || {
+            run_service_thread(qt_thread);
+        });
+    }
+}
+
+fn run_service_thread(qt_thread: cxx_qt::CxxQtThread<qobject::EscuchaBackend>) {
+    // Run preflight checks
+    let report = crate::preflight::check_environment();
+    if report.has_critical_failures() {
+        let error_msg = report.critical_failure_summary();
+        let input_failed = report
+            .checks
+            .iter()
+            .any(|c| c.name == "input devices" && !c.passed);
+
+        let _ = qt_thread.queue(move |mut qobject| {
+            qobject
+                .as_mut()
+                .set_status_text(QString::from("Stopped"));
+            qobject.as_mut().set_show_spinner(false);
+            qobject.as_mut().set_is_stopped(true);
+            qobject
+                .as_mut()
+                .set_status_icon_name(QString::from("microphone-disabled-symbolic"));
+            if input_failed {
+                qobject.as_mut().set_show_fix_button(true);
+            }
+            qobject
+                .as_mut()
+                .error_occurred(QString::from(error_msg.as_str()));
+        });
+        return;
+    }
+
+    if report.has_warnings() {
+        for check in &report.checks {
+            if !check.passed {
+                let msg = match &check.hint {
+                    Some(hint) => format!("{}: {} ({})", check.name, check.message, hint),
+                    None => format!("{}: {}", check.name, check.message),
+                };
+                let _ = qt_thread.queue(move |mut qobject| {
+                    qobject
+                        .as_mut()
+                        .error_occurred(QString::from(msg.as_str()));
+                });
+            }
+        }
+    }
+
+    let settings = match config::load_settings() {
+        Ok(s) => s,
+        Err(e) => {
+            let msg = format!("Config error: {e}");
+            let _ = qt_thread.queue(move |mut qobject| {
+                qobject
+                    .as_mut()
+                    .set_status_text(QString::from("Stopped"));
+                qobject.as_mut().set_show_spinner(false);
+                qobject.as_mut().set_is_stopped(true);
+                qobject
+                    .as_mut()
+                    .set_status_icon_name(QString::from("microphone-disabled-symbolic"));
+                qobject
+                    .as_mut()
+                    .error_occurred(QString::from(msg.as_str()));
+            });
+            return;
+        }
+    };
+
+    match crate::service::DictationService::new(settings) {
+        Ok(service) => {
+            let device_label = service.device_label();
+            let display_name = strip_device_prefix(&device_label).to_string();
+            let _ = qt_thread.queue(move |mut qobject| {
+                qobject
+                    .as_mut()
+                    .set_device_name(QString::from(display_name.as_str()));
+            });
+
+            // Set up shutdown bridge: store the service's shutdown handle into the QObject
+            let svc_shutdown = service.shutdown_handle();
+            let gui_shutdown = svc_shutdown.clone();
+            let _ = qt_thread.queue(move |mut qobject| {
+                qobject.as_mut().rust_mut().shutdown_flag = Some(gui_shutdown);
+            });
+
+            let mut callbacks = BridgeCallbacks {
+                qt_thread: qt_thread.clone(),
+            };
+            if let Err(e) = service.run_loop(&mut callbacks) {
+                log::error!("Service error: {e}");
+            }
+        }
+        Err(e) => {
+            let msg = format!("{e}");
+            let _ = qt_thread.queue(move |mut qobject| {
+                qobject
+                    .as_mut()
+                    .set_status_text(QString::from("Stopped"));
+                qobject.as_mut().set_show_spinner(false);
+                qobject.as_mut().set_is_stopped(true);
+                qobject
+                    .as_mut()
+                    .set_status_icon_name(QString::from("microphone-disabled-symbolic"));
+                qobject
+                    .as_mut()
+                    .error_occurred(QString::from(msg.as_str()));
+            });
+        }
+    }
+}
+
+struct BridgeCallbacks {
+    qt_thread: cxx_qt::CxxQtThread<qobject::EscuchaBackend>,
+}
+
+impl ServiceCallbacks for BridgeCallbacks {
+    fn on_status(&mut self, status: ServiceStatus) {
+        let _ = self.qt_thread.queue(move |mut qobject| {
+            // Reset state booleans
+            qobject.as_mut().set_is_recording(false);
+            qobject.as_mut().set_is_stopped(false);
+            qobject.as_mut().set_is_ready(false);
+
+            match status {
+                ServiceStatus::Stopped => {
+                    qobject
+                        .as_mut()
+                        .set_status_text(QString::from("Stopped"));
+                    qobject.as_mut().set_show_spinner(false);
+                    qobject.as_mut().set_is_stopped(true);
+                    qobject
+                        .as_mut()
+                        .set_status_icon_name(QString::from("microphone-disabled-symbolic"));
+                    qobject.as_mut().set_status_detail(QString::from(""));
+                }
+                ServiceStatus::Starting => {
+                    qobject
+                        .as_mut()
+                        .set_status_text(QString::from("Starting..."));
+                    qobject.as_mut().set_show_spinner(true);
+                    qobject
+                        .as_mut()
+                        .set_status_icon_name(QString::from("audio-input-microphone-symbolic"));
+                }
+                ServiceStatus::Ready => {
+                    qobject
+                        .as_mut()
+                        .set_status_text(QString::from("Ready"));
+                    qobject.as_mut().set_show_spinner(false);
+                    qobject.as_mut().set_is_ready(true);
+                    qobject
+                        .as_mut()
+                        .set_status_icon_name(QString::from("audio-input-microphone-symbolic"));
+                    qobject
+                        .as_mut()
+                        .set_status_detail(QString::from("Hold Right Ctrl to speak"));
+                }
+                ServiceStatus::Recording => {
+                    qobject
+                        .as_mut()
+                        .set_status_text(QString::from("Recording..."));
+                    qobject.as_mut().set_show_spinner(false);
+                    qobject.as_mut().set_is_recording(true);
+                    qobject.as_mut().set_status_icon_name(QString::from(
+                        "microphone-sensitivity-high-symbolic",
+                    ));
+                    qobject
+                        .as_mut()
+                        .set_status_detail(QString::from("Release to transcribe"));
+                }
+                ServiceStatus::Transcribing => {
+                    qobject
+                        .as_mut()
+                        .set_status_text(QString::from("Transcribing..."));
+                    qobject.as_mut().set_show_spinner(true);
+                    qobject
+                        .as_mut()
+                        .set_status_icon_name(QString::from("audio-input-microphone-symbolic"));
+                    qobject.as_mut().set_status_detail(QString::from(""));
+                }
+                ServiceStatus::Stopping => {
+                    qobject
+                        .as_mut()
+                        .set_status_text(QString::from("Stopping..."));
+                    qobject.as_mut().set_show_spinner(true);
+                    qobject.as_mut().set_is_stopped(true);
+                    qobject
+                        .as_mut()
+                        .set_status_icon_name(QString::from("microphone-disabled-symbolic"));
+                    qobject.as_mut().set_status_detail(QString::from(""));
+                }
+            }
+        });
+    }
+
+    fn on_status_msg(&mut self, msg: &str) {
+        let msg = msg.to_string();
+        let _ = self.qt_thread.queue(move |mut qobject| {
+            qobject
+                .as_mut()
+                .set_status_detail(QString::from(msg.as_str()));
+        });
+    }
+
+    fn on_text(&mut self, text: &str) {
+        let text = text.to_string();
+        let _ = self.qt_thread.queue(move |mut qobject| {
+            if text.is_empty() {
+                qobject
+                    .as_mut()
+                    .set_transcription(QString::from("Hold Right Ctrl and speak..."));
+            } else {
+                qobject
+                    .as_mut()
+                    .set_transcription(QString::from(text.as_str()));
+            }
+        });
+    }
+
+    fn on_error(&mut self, error: &str) {
+        let error = error.to_string();
+        let _ = self.qt_thread.queue(move |mut qobject| {
+            qobject
+                .as_mut()
+                .error_occurred(QString::from(error.as_str()));
+        });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_device_prefix() {
+        assert_eq!(
+            strip_device_prefix("/dev/input/event5 - AT Translated Set 2 keyboard"),
+            "AT Translated Set 2 keyboard"
+        );
+        assert_eq!(
+            strip_device_prefix("Some Device Without Prefix"),
+            "Some Device Without Prefix"
+        );
+        assert_eq!(strip_device_prefix(""), "");
+    }
+}

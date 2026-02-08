@@ -1,119 +1,154 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/bash
+set -e
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV="$ROOT_DIR/.venv"
-SERVICE_DIR="$HOME/.config/systemd/user"
-SERVICE_NAME="escucha.service"
+INSTALL_DIR="${HOME}/.local/bin"
+SYSTEMD_DIR="${HOME}/.config/systemd/user"
 
-NO_SERVICE=0
+echo "==> escucha installer"
+echo ""
 
-usage() {
-  echo "Usage: $0 [--no-service]"
-}
-
-for arg in "$@"; do
-  case "$arg" in
-    --no-service)
-      NO_SERVICE=1
-      ;;
-    -h|--help)
-      usage
-      exit 0
-      ;;
-    *)
-      echo "Unknown argument: $arg" >&2
-      usage >&2
-      exit 1
-      ;;
-  esac
-done
-
-OS_ID=""
-OS_LIKE=""
-if [[ -f /etc/os-release ]]; then
-  . /etc/os-release
-  OS_ID="${ID:-}"
-  OS_LIKE="${ID_LIKE:-}"
-fi
-
-print_deps_hint() {
-  case "$OS_ID" in
-    fedora)
-      echo "Install deps: sudo dnf install -y python3.12 python3.12-devel python3.12-tkinter alsa-utils wl-clipboard ydotool xdotool wtype"
-      ;;
-    debian|ubuntu)
-      echo "Install deps: sudo apt install -y python3 python3-venv python3-tk alsa-utils wl-clipboard ydotool xdotool wtype"
-      ;;
-    arch)
-      echo "Install deps: sudo pacman -S --needed python alsa-utils wl-clipboard ydotool xdotool wtype tk"
-      ;;
-    *)
-      echo "Install deps: python3, alsa-utils (arecord), wl-clipboard, and one of ydotool/wtype/xdotool"
-      ;;
-  esac
-}
-
-PYTHON=""
-for candidate in python3.12 python3.11 python3.10 python3; do
-  if command -v "$candidate" >/dev/null 2>&1; then
-    PYTHON="$candidate"
-    break
-  fi
-done
-
-if [[ -z "$PYTHON" ]]; then
-  echo "No suitable Python found (need python3.10+)." >&2
-  exit 1
-fi
-
-if [[ -x "$VENV/bin/python" ]]; then
-  CURRENT_VER="$("$VENV/bin/python" -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-  TARGET_VER="$("$PYTHON" -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-  if [[ "$CURRENT_VER" != "$TARGET_VER" ]]; then
-    echo "Existing venv uses Python $CURRENT_VER but installer will use $TARGET_VER." >&2
-    echo "Please remove $VENV and re-run install.sh." >&2
-    exit 1
-  fi
-fi
-
-"$PYTHON" -m venv "$VENV"
-"$VENV/bin/pip" install --upgrade pip
-"$VENV/bin/pip" install -r "$ROOT_DIR/requirements.txt"
-
-mkdir -p "$SERVICE_DIR"
-cp "$ROOT_DIR/systemd/$SERVICE_NAME" "$SERVICE_DIR/$SERVICE_NAME"
-
-mkdir -p "$HOME/.config/escucha"
-
-missing=()
-for cmd in arecord; do
-  if ! command -v "$cmd" >/dev/null 2>&1; then
-    missing+=("$cmd")
-  fi
-done
-
-if ! command -v ydotool >/dev/null 2>&1 && ! command -v wtype >/dev/null 2>&1 && ! command -v xdotool >/dev/null 2>&1; then
-  missing+=("ydotool|wtype|xdotool")
-fi
-
-if ! command -v wl-copy >/dev/null 2>&1; then
-  missing+=("wl-copy")
-fi
-
-if [[ "${#missing[@]}" -gt 0 ]]; then
-  echo "Missing commands: ${missing[*]}" >&2
-  print_deps_hint >&2
-fi
-
-if [[ "$NO_SERVICE" -eq 0 ]] && command -v systemctl >/dev/null 2>&1; then
-  systemctl --user daemon-reload
-  systemctl --user enable --now "$SERVICE_NAME"
-  echo "Installed and started $SERVICE_NAME"
+# Detect distro
+if [ -f /etc/os-release ]; then
+    . /etc/os-release
+    DISTRO=$ID
 else
-  echo "Skipping systemd service install."
-  echo "Run manually with: $VENV/bin/python -m escucha"
+    echo "Warning: Cannot detect distro, skipping dependency check"
+    DISTRO="unknown"
 fi
 
-echo "If key events aren't detected, add your user to the input group:"
-echo "  sudo usermod -aG input $USER"
+# Check/install dependencies based on distro
+echo "==> Checking dependencies..."
+MISSING_DEPS=()
+
+check_command() {
+    if ! command -v "$1" &> /dev/null; then
+        MISSING_DEPS+=("$2")
+    fi
+}
+
+check_command "cargo" "rust cargo"
+check_command "arecord" "alsa-utils"
+check_command "wl-copy" "wl-clipboard"
+
+# Check for paste tool (prefer ydotool for KDE compatibility)
+if [ "$XDG_CURRENT_DESKTOP" = "KDE" ]; then
+    # KDE requires ydotool (wtype doesn't work due to lack of virtual keyboard support)
+    if ! command -v ydotool &> /dev/null; then
+        MISSING_DEPS+=("ydotool")
+    fi
+else
+    # Other compositors: prefer wtype, fall back to ydotool
+    if ! command -v wtype &> /dev/null && ! command -v ydotool &> /dev/null; then
+        MISSING_DEPS+=("wtype")
+    fi
+fi
+
+if [ ${#MISSING_DEPS[@]} -gt 0 ]; then
+    echo "Missing dependencies: ${MISSING_DEPS[*]}"
+    echo ""
+
+    case "$DISTRO" in
+        fedora)
+            echo "Installing dependencies with dnf..."
+            sudo dnf install -y "${MISSING_DEPS[@]}"
+            ;;
+        ubuntu|debian)
+            echo "Installing dependencies with apt..."
+            sudo apt update
+            sudo apt install -y "${MISSING_DEPS[@]}"
+            ;;
+        arch|manjaro)
+            echo "Installing dependencies with pacman..."
+            sudo pacman -S --needed "${MISSING_DEPS[@]}"
+            ;;
+        *)
+            echo "Please install manually:"
+            for dep in "${MISSING_DEPS[@]}"; do
+                echo "  - $dep"
+            done
+            echo ""
+            read -p "Continue anyway? (y/N) " -n 1 -r
+            echo
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                exit 1
+            fi
+            ;;
+    esac
+fi
+
+echo "==> Building escucha..."
+cargo build --release
+
+echo "==> Installing binary to $INSTALL_DIR..."
+mkdir -p "$INSTALL_DIR"
+install -m755 target/release/escucha "$INSTALL_DIR/escucha"
+
+echo "==> Installing systemd service to $SYSTEMD_DIR..."
+mkdir -p "$SYSTEMD_DIR"
+cat > "$SYSTEMD_DIR/escucha.service" <<EOF
+[Unit]
+Description=Escucha speech-to-text service
+After=graphical-session.target ydotoold.service
+
+[Service]
+Type=simple
+ExecStart=$INSTALL_DIR/escucha
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+# Set up ydotoold service if ydotool is installed
+if command -v ydotool &> /dev/null; then
+    echo "==> Setting up ydotoold daemon service..."
+    cat > "$SYSTEMD_DIR/ydotoold.service" <<EOF
+[Unit]
+Description=ydotool daemon for input automation
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=$(which ydotoold)
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+EOF
+
+    systemctl --user daemon-reload
+    systemctl --user enable ydotoold.service
+    systemctl --user start ydotoold.service
+
+    echo "ydotoold service installed and started"
+fi
+
+echo "==> Checking input group permissions..."
+if ! groups | grep -q "\binput\b"; then
+    echo ""
+    echo "Warning: You are not in the 'input' group."
+    echo "This is required to access /dev/input devices."
+    echo ""
+    read -p "Add yourself to the input group now? (Y/n) " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Nn]$ ]]; then
+        sudo usermod -aG input "$USER"
+        echo "Added to input group. You'll need to log out and back in."
+        echo "(Or use the tray app's 'Fix Input Permissions' action to restart with the group active)"
+    fi
+fi
+
+echo ""
+echo "==> Installation complete!"
+echo ""
+echo "Test the environment:"
+echo "  escucha --check"
+echo ""
+echo "Run the tray app:"
+echo "  escucha --gui"
+echo ""
+echo "Enable as a service:"
+echo "  systemctl --user enable --now escucha.service"
+echo ""

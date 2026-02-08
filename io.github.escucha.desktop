@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Escucha
+GenericName=Speech-to-Text Tray App
+Comment=Hold-to-talk speech-to-text in the system tray
+Exec=escucha --gui
+Icon=audio-input-microphone
+Terminal=false
+Categories=Utility;AudioVideo;
+Keywords=speech;dictation;transcription;voice;
+StartupNotify=false
