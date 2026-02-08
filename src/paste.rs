@@ -1,4 +1,5 @@
 use anyhow::{Context, Result, bail};
+use std::path::PathBuf;
 use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -49,7 +50,7 @@ pub fn pick_paste_method(setting: &str) -> Result<PasteMethod> {
 
     if is_wayland {
         // Prefer ydotool (works on all compositors including KDE)
-        if is_available("ydotool") {
+        if is_available("ydotool") && (ydotool_socket_available() || ensure_ydotoold_running()) {
             return Ok(PasteMethod::Ydotool);
         }
         // wtype only works on compositors that support virtual keyboard
@@ -74,6 +75,36 @@ pub fn pick_paste_method(setting: &str) -> Result<PasteMethod> {
 
 fn is_available(cmd: &str) -> bool {
     which::which(cmd).is_ok()
+}
+
+fn ydotool_socket_path_candidates() -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    if let Ok(path) = std::env::var("YDOTOOL_SOCKET") {
+        paths.push(PathBuf::from(path));
+    }
+    paths.push(PathBuf::from("/tmp/.ydotool_socket"));
+    paths
+}
+
+pub fn ydotool_socket_available() -> bool {
+    ydotool_socket_path_candidates().iter().any(|p| p.exists())
+}
+
+/// Best-effort startup of ydotoold for desktop sessions where the user has installed a user unit.
+pub fn ensure_ydotoold_running() -> bool {
+    if ydotool_socket_available() {
+        return true;
+    }
+
+    let started = Command::new("systemctl")
+        .args(["--user", "start", "ydotoold.service"])
+        .status()
+        .is_ok_and(|s| s.success());
+    if started {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+
+    ydotool_socket_available()
 }
 
 /// Paste text using the configured method.

@@ -69,6 +69,12 @@ Item {
             }
 
             Platform.MenuItem {
+                text: "Fix Paste Setup"
+                visible: backend.showPasteFixButton
+                onTriggered: backend.fixPasteSetup()
+            }
+
+            Platform.MenuItem {
                 text: "Quit Escucha"
                 onTriggered: {
                     backend.requestShutdown()

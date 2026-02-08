@@ -179,12 +179,43 @@ fn check_paste_tool() -> CheckResult {
 
     if is_wayland {
         if which::which("ydotool").is_ok() {
+            if crate::paste::ydotool_socket_available() || crate::paste::ensure_ydotoold_running() {
+                return CheckResult {
+                    name,
+                    passed: true,
+                    severity: CheckSeverity::Critical,
+                    message: "ydotool ready (Wayland)".into(),
+                    hint: None,
+                };
+            }
+
+            // Fall through to alternative tools if daemon isn't running.
+            if which::which("wtype").is_ok() {
+                return CheckResult {
+                    name,
+                    passed: true,
+                    severity: CheckSeverity::Warning,
+                    message: "ydotoold not running; using wtype fallback".into(),
+                    hint: Some("Start ydotoold for KDE compatibility: systemctl --user enable --now ydotoold.service".into()),
+                };
+            }
+
+            if which::which("wl-copy").is_ok() {
+                return CheckResult {
+                    name,
+                    passed: true,
+                    severity: CheckSeverity::Warning,
+                    message: "ydotoold not running (clipboard-only fallback)".into(),
+                    hint: Some("Start ydotoold for automatic pasting: systemctl --user enable --now ydotoold.service".into()),
+                };
+            }
+
             return CheckResult {
                 name,
-                passed: true,
+                passed: false,
                 severity: CheckSeverity::Critical,
-                message: "ydotool available (Wayland)".into(),
-                hint: None,
+                message: "ydotool installed, but ydotoold is not running".into(),
+                hint: Some("Start ydotoold: systemctl --user enable --now ydotoold.service".into()),
             };
         }
         if which::which("wtype").is_ok() {

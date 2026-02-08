@@ -16,6 +16,7 @@ pub mod qobject {
         #[qproperty(QString, status_icon_name)]
         #[qproperty(bool, show_spinner)]
         #[qproperty(bool, show_fix_button)]
+        #[qproperty(bool, show_paste_fix_button)]
         #[qproperty(bool, is_recording)]
         #[qproperty(bool, is_stopped)]
         #[qproperty(bool, is_ready)]
@@ -23,6 +24,9 @@ pub mod qobject {
 
         #[qinvokable]
         fn fix_permissions(self: Pin<&mut EscuchaBackend>);
+
+        #[qinvokable]
+        fn fix_paste_setup(self: Pin<&mut EscuchaBackend>);
 
         #[qinvokable]
         fn request_shutdown(self: Pin<&mut EscuchaBackend>);
@@ -83,6 +87,7 @@ pub struct EscuchaBackendRust {
     status_icon_name: QString,
     show_spinner: bool,
     show_fix_button: bool,
+    show_paste_fix_button: bool,
     is_recording: bool,
     is_stopped: bool,
     is_ready: bool,
@@ -142,6 +147,32 @@ impl qobject::EscuchaBackend {
             flag.store(true, Ordering::Relaxed);
         }
     }
+
+    pub fn fix_paste_setup(self: Pin<&mut Self>) {
+        let qt_thread = self.qt_thread();
+        std::thread::spawn(move || {
+            let ok = crate::paste::ensure_ydotoold_running();
+            let _ = qt_thread.queue(move |mut qobject| {
+                if ok {
+                    qobject.as_mut().set_show_paste_fix_button(false);
+                    qobject.as_mut().set_status_detail(QString::from(
+                        "Paste setup fixed. Restarting...",
+                    ));
+                    let _ = std::process::Command::new(
+                        std::env::current_exe()
+                            .unwrap_or_else(|_| std::path::PathBuf::from("escucha")),
+                    )
+                    .args(std::env::args().skip(1))
+                    .spawn();
+                    std::process::exit(0);
+                } else {
+                    qobject.as_mut().error_occurred(QString::from(
+                        "Could not start ydotoold. Run: systemctl --user enable --now ydotoold.service",
+                    ));
+                }
+            });
+        });
+    }
 }
 
 impl cxx_qt::Initialize for qobject::EscuchaBackend {
@@ -170,6 +201,19 @@ fn run_service_thread(qt_thread: cxx_qt::CxxQtThread<qobject::EscuchaBackend>) {
             .checks
             .iter()
             .any(|c| c.name == "input devices" && !c.passed);
+        let paste_failed = report
+            .checks
+            .iter()
+            .any(|c| c.name == "paste tool" && !c.passed);
+        let detail_msg = report
+            .checks
+            .iter()
+            .find(|c| !c.passed)
+            .map(|c| match &c.hint {
+                Some(h) => format!("{}: {}", c.message, h),
+                None => c.message.clone(),
+            })
+            .unwrap_or_default();
 
         let _ = qt_thread.queue(move |mut qobject| {
             qobject
@@ -182,6 +226,14 @@ fn run_service_thread(qt_thread: cxx_qt::CxxQtThread<qobject::EscuchaBackend>) {
                 .set_status_icon_name(QString::from("microphone-disabled-symbolic"));
             if input_failed {
                 qobject.as_mut().set_show_fix_button(true);
+            }
+            if paste_failed {
+                qobject.as_mut().set_show_paste_fix_button(true);
+            }
+            if !detail_msg.is_empty() {
+                qobject
+                    .as_mut()
+                    .set_status_detail(QString::from(detail_msg.as_str()));
             }
             qobject
                 .as_mut()
@@ -315,6 +367,8 @@ impl ServiceCallbacks for BridgeCallbacks {
                     qobject
                         .as_mut()
                         .set_status_detail(QString::from("Hold Right Ctrl to speak"));
+                    qobject.as_mut().set_show_fix_button(false);
+                    qobject.as_mut().set_show_paste_fix_button(false);
                 }
                 ServiceStatus::Recording => {
                     qobject
