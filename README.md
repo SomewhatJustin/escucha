@@ -61,6 +61,7 @@ makepkg -si
 After install:
 - Launch tray app: `escucha --gui`
 - KRunner launcher: `Escucha`
+- First launch now performs setup checks (permissions + ydotoold) and enables GUI autostart
 
 ## Build & Install
 
@@ -144,6 +145,8 @@ escucha --gui
 ```
 
 Runs as a system tray app and shows status/error notifications.
+On first launch, Escucha will attempt to enable start-on-login by writing
+`~/.config/autostart/io.github.escucha.desktop`.
 
 ### List input devices
 

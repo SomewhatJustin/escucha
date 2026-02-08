@@ -59,6 +59,7 @@ pub fn strip_device_prefix(label: &str) -> &str {
 }
 
 const SG_REEXEC_ENV: &str = "ESCUCHA_SG_REEXECED";
+const GUI_AUTOSTART_DESKTOP_FILE: &str = "io.github.escucha.desktop";
 
 fn shell_quote(arg: &str) -> String {
     let escaped = arg.replace('\'', "'\"'\"'");
@@ -89,7 +90,7 @@ fn restart_app() {
     std::process::exit(0);
 }
 
-const FIRST_RUN_MARKER: &str = "first-run-onboarding-v1.done";
+const FIRST_RUN_MARKER: &str = "first-run-onboarding-v2.done";
 
 fn escucha_state_dir() -> PathBuf {
     dirs::state_dir()
@@ -111,6 +112,51 @@ fn mark_first_launch_complete() {
         let _ = std::fs::create_dir_all(dir);
     }
     let _ = std::fs::write(marker, b"ok\n");
+}
+
+fn gui_autostart_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("~/.config"))
+        .join("autostart")
+        .join(GUI_AUTOSTART_DESKTOP_FILE)
+}
+
+fn fallback_autostart_desktop_entry() -> &'static str {
+    "[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Escucha
+Comment=Hold-to-talk speech-to-text in the system tray
+Exec=escucha --gui
+Icon=audio-input-microphone
+Terminal=false
+Categories=Utility;AudioVideo;
+StartupNotify=false
+"
+}
+
+fn ensure_gui_autostart_enabled() -> Result<bool, String> {
+    let target = gui_autostart_path();
+    if target.exists() {
+        return Ok(false);
+    }
+
+    if let Some(parent) = target.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Could not create autostart directory: {e}"))?;
+    }
+
+    let desktop_source = PathBuf::from("/usr/share/applications/io.github.escucha.desktop");
+    let content = if desktop_source.exists() {
+        std::fs::read_to_string(&desktop_source)
+            .map_err(|e| format!("Could not read {desktop_source:?}: {e}"))?
+    } else {
+        fallback_autostart_desktop_entry().to_string()
+    };
+
+    std::fs::write(&target, content)
+        .map_err(|e| format!("Could not write {}: {e}", target.display()))?;
+    Ok(true)
 }
 
 fn user_listed_in_input_group(user: &str) -> bool {
@@ -235,9 +281,29 @@ fn first_launch_onboarding(qt_thread: &cxx_qt::CxxQtThread<qobject::EscuchaBacke
             .set_status_detail(QString::from("Running first-launch setup checks..."));
     });
 
+    let mut setup_complete = true;
+
+    match ensure_gui_autostart_enabled() {
+        Ok(true) => {
+            let _ = qt_thread.queue(move |mut qobject| {
+                qobject
+                    .as_mut()
+                    .set_status_detail(QString::from("Enabled start-on-login for Escucha."));
+            });
+        }
+        Ok(false) => {}
+        Err(e) => {
+            setup_complete = false;
+            let _ = qt_thread.queue(move |mut qobject| {
+                qobject.as_mut().error_occurred(QString::from(e.as_str()));
+            });
+        }
+    }
+
     // Best effort: make sure paste service is enabled/running up front.
     let paste_ready = crate::paste::ensure_ydotoold_running();
     if !paste_ready && which::which("ydotool").is_ok() {
+        setup_complete = false;
         let _ = qt_thread.queue(move |mut qobject| {
             qobject.as_mut().set_show_paste_fix_button(true);
             qobject.as_mut().set_status_detail(QString::from(
@@ -256,6 +322,7 @@ fn first_launch_onboarding(qt_thread: &cxx_qt::CxxQtThread<qobject::EscuchaBacke
         .any(|c| c.name == "input devices" && !c.passed);
 
     if input_failed {
+        setup_complete = false;
         let _ = qt_thread.queue(move |mut qobject| {
             qobject.as_mut().set_show_fix_button(true);
             qobject.as_mut().set_status_detail(QString::from(
@@ -265,7 +332,24 @@ fn first_launch_onboarding(qt_thread: &cxx_qt::CxxQtThread<qobject::EscuchaBacke
         let _ = attempt_input_permission_fix(qt_thread.clone());
     }
 
-    mark_first_launch_complete();
+    let post_report = crate::preflight::check_environment();
+    if post_report.has_critical_failures() {
+        setup_complete = false;
+    }
+
+    if which::which("ydotool").is_ok() && !crate::paste::ydotool_ready() {
+        setup_complete = false;
+    }
+
+    if setup_complete {
+        mark_first_launch_complete();
+    } else {
+        let _ = qt_thread.queue(move |mut qobject| {
+            qobject.as_mut().set_status_detail(QString::from(
+                "Setup still incomplete. Escucha will retry setup checks on next launch.",
+            ));
+        });
+    }
 }
 
 #[derive(Default)]

@@ -4,7 +4,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/escucha
+ExecStart=/usr/bin/escucha
 Restart=on-failure
 RestartSec=5
 

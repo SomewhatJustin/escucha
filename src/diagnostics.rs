@@ -26,6 +26,8 @@ struct EnvironmentInfo {
     x11_display: Option<String>,
     xdg_session_type: Option<String>,
     xdg_current_desktop: Option<String>,
+    gui_autostart_enabled: bool,
+    gui_autostart_path: String,
     command_available: BTreeMap<String, bool>,
     user_service_state: BTreeMap<String, String>,
 }
@@ -154,6 +156,8 @@ fn collect_environment() -> EnvironmentInfo {
         x11_display: std::env::var("DISPLAY").ok(),
         xdg_session_type: std::env::var("XDG_SESSION_TYPE").ok(),
         xdg_current_desktop: std::env::var("XDG_CURRENT_DESKTOP").ok(),
+        gui_autostart_enabled: gui_autostart_path().exists(),
+        gui_autostart_path: gui_autostart_path().display().to_string(),
         command_available,
         user_service_state,
     }
@@ -588,6 +592,13 @@ fn uinput_mode_string() -> Option<String> {
         meta.uid(),
         meta.gid()
     ))
+}
+
+fn gui_autostart_path() -> PathBuf {
+    dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("~/.config"))
+        .join("autostart")
+        .join("io.github.escucha.desktop")
 }
 
 fn step_pass(
