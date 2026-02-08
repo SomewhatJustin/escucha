@@ -1,6 +1,6 @@
 # Maintainer: Justin <justin@example.com>
 pkgname=escucha
-pkgver=0.2.6
+pkgver=0.2.7
 pkgrel=1
 pkgdesc="Hold-to-talk speech-to-text for Linux"
 arch=('x86_64')
@@ -40,6 +40,8 @@ package() {
     install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
     install -Dm644 "systemd/$pkgname.service" "$pkgdir/usr/lib/systemd/user/$pkgname.service"
     install -Dm644 "systemd/ydotoold.service" "$pkgdir/usr/lib/systemd/user/ydotoold.service"
+    install -Dm644 "assets/io.github.escucha.svg" \
+        "$pkgdir/usr/share/icons/hicolor/scalable/apps/io.github.escucha.svg"
     install -Dm644 "$srcdir/io.github.escucha.desktop" \
         "$pkgdir/usr/share/applications/io.github.escucha.desktop"
     install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"

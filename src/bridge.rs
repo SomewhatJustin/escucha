@@ -60,6 +60,7 @@ pub fn strip_device_prefix(label: &str) -> &str {
 
 const SG_REEXEC_ENV: &str = "ESCUCHA_SG_REEXECED";
 const GUI_AUTOSTART_DESKTOP_FILE: &str = "io.github.escucha.desktop";
+const APP_ICON_NAME: &str = "io.github.escucha";
 
 fn shell_quote(arg: &str) -> String {
     let escaped = arg.replace('\'', "'\"'\"'");
@@ -128,7 +129,7 @@ Type=Application
 Name=Escucha
 Comment=Hold-to-talk speech-to-text in the system tray
 Exec=escucha --gui
-Icon=audio-input-microphone
+Icon=io.github.escucha
 Terminal=false
 Categories=Utility;AudioVideo;
 StartupNotify=false
@@ -138,6 +139,16 @@ StartupNotify=false
 fn ensure_gui_autostart_enabled() -> Result<bool, String> {
     let target = gui_autostart_path();
     if target.exists() {
+        if let Ok(existing) = std::fs::read_to_string(&target) {
+            if existing.contains("Icon=audio-input-microphone") {
+                let updated =
+                    existing.replace("Icon=audio-input-microphone", "Icon=io.github.escucha");
+                std::fs::write(&target, updated).map_err(|e| {
+                    format!("Could not update legacy icon in {}: {e}", target.display())
+                })?;
+                return Ok(true);
+            }
+        }
         return Ok(false);
     }
 
@@ -413,7 +424,7 @@ impl cxx_qt::Initialize for qobject::EscuchaBackend {
     fn initialize(mut self: Pin<&mut Self>) {
         self.as_mut().set_status_text(QString::from("Starting..."));
         self.as_mut()
-            .set_status_icon_name(QString::from("audio-input-microphone-symbolic"));
+            .set_status_icon_name(QString::from(APP_ICON_NAME));
         self.as_mut().set_show_spinner(true);
         self.as_mut()
             .set_transcription(QString::from("Hold Right Ctrl and speak..."));
@@ -456,7 +467,7 @@ fn run_service_thread(qt_thread: cxx_qt::CxxQtThread<qobject::EscuchaBackend>) {
             qobject.as_mut().set_is_stopped(true);
             qobject
                 .as_mut()
-                .set_status_icon_name(QString::from("microphone-disabled-symbolic"));
+                .set_status_icon_name(QString::from(APP_ICON_NAME));
             if input_failed {
                 qobject.as_mut().set_show_fix_button(true);
             }
@@ -499,7 +510,7 @@ fn run_service_thread(qt_thread: cxx_qt::CxxQtThread<qobject::EscuchaBackend>) {
                 qobject.as_mut().set_is_stopped(true);
                 qobject
                     .as_mut()
-                    .set_status_icon_name(QString::from("microphone-disabled-symbolic"));
+                    .set_status_icon_name(QString::from(APP_ICON_NAME));
                 qobject.as_mut().error_occurred(QString::from(msg.as_str()));
             });
             return;
@@ -538,7 +549,7 @@ fn run_service_thread(qt_thread: cxx_qt::CxxQtThread<qobject::EscuchaBackend>) {
                 qobject.as_mut().set_is_stopped(true);
                 qobject
                     .as_mut()
-                    .set_status_icon_name(QString::from("microphone-disabled-symbolic"));
+                    .set_status_icon_name(QString::from(APP_ICON_NAME));
                 qobject.as_mut().error_occurred(QString::from(msg.as_str()));
             });
         }
@@ -564,7 +575,7 @@ impl ServiceCallbacks for BridgeCallbacks {
                     qobject.as_mut().set_is_stopped(true);
                     qobject
                         .as_mut()
-                        .set_status_icon_name(QString::from("microphone-disabled-symbolic"));
+                        .set_status_icon_name(QString::from(APP_ICON_NAME));
                     qobject.as_mut().set_status_detail(QString::from(""));
                 }
                 ServiceStatus::Starting => {
@@ -574,7 +585,7 @@ impl ServiceCallbacks for BridgeCallbacks {
                     qobject.as_mut().set_show_spinner(true);
                     qobject
                         .as_mut()
-                        .set_status_icon_name(QString::from("audio-input-microphone-symbolic"));
+                        .set_status_icon_name(QString::from(APP_ICON_NAME));
                 }
                 ServiceStatus::Ready => {
                     qobject.as_mut().set_status_text(QString::from("Ready"));
@@ -582,7 +593,7 @@ impl ServiceCallbacks for BridgeCallbacks {
                     qobject.as_mut().set_is_ready(true);
                     qobject
                         .as_mut()
-                        .set_status_icon_name(QString::from("audio-input-microphone-symbolic"));
+                        .set_status_icon_name(QString::from(APP_ICON_NAME));
                     qobject
                         .as_mut()
                         .set_status_detail(QString::from("Hold Right Ctrl to speak"));
@@ -595,9 +606,9 @@ impl ServiceCallbacks for BridgeCallbacks {
                         .set_status_text(QString::from("Recording..."));
                     qobject.as_mut().set_show_spinner(false);
                     qobject.as_mut().set_is_recording(true);
-                    qobject.as_mut().set_status_icon_name(QString::from(
-                        "microphone-sensitivity-high-symbolic",
-                    ));
+                    qobject
+                        .as_mut()
+                        .set_status_icon_name(QString::from(APP_ICON_NAME));
                     qobject
                         .as_mut()
                         .set_status_detail(QString::from("Release to transcribe"));
@@ -609,7 +620,7 @@ impl ServiceCallbacks for BridgeCallbacks {
                     qobject.as_mut().set_show_spinner(true);
                     qobject
                         .as_mut()
-                        .set_status_icon_name(QString::from("audio-input-microphone-symbolic"));
+                        .set_status_icon_name(QString::from(APP_ICON_NAME));
                     qobject.as_mut().set_status_detail(QString::from(""));
                 }
                 ServiceStatus::Stopping => {
@@ -620,7 +631,7 @@ impl ServiceCallbacks for BridgeCallbacks {
                     qobject.as_mut().set_is_stopped(true);
                     qobject
                         .as_mut()
-                        .set_status_icon_name(QString::from("microphone-disabled-symbolic"));
+                        .set_status_icon_name(QString::from(APP_ICON_NAME));
                     qobject.as_mut().set_status_detail(QString::from(""));
                 }
             }

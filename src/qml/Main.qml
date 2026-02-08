@@ -32,7 +32,7 @@ Item {
     Platform.SystemTrayIcon {
         id: tray
         visible: true
-        icon.name: backend.statusIconName || "audio-input-microphone-symbolic"
+        icon.name: backend.statusIconName || "io.github.escucha"
         tooltip: root.tooltipText()
 
         menu: Platform.Menu {

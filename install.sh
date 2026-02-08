@@ -3,6 +3,8 @@ set -e
 
 INSTALL_DIR="${HOME}/.local/bin"
 SYSTEMD_DIR="${HOME}/.config/systemd/user"
+APP_DIR="${HOME}/.local/share/applications"
+ICON_DIR="${HOME}/.local/share/icons/hicolor/scalable/apps"
 
 echo "==> escucha installer"
 echo ""
@@ -82,6 +84,11 @@ cargo build --release
 echo "==> Installing binary to $INSTALL_DIR..."
 mkdir -p "$INSTALL_DIR"
 install -m755 target/release/escucha "$INSTALL_DIR/escucha"
+
+echo "==> Installing desktop entry and icon..."
+mkdir -p "$APP_DIR" "$ICON_DIR"
+install -m644 io.github.escucha.desktop "$APP_DIR/io.github.escucha.desktop"
+install -m644 assets/io.github.escucha.svg "$ICON_DIR/io.github.escucha.svg"
 
 echo "==> Installing systemd service to $SYSTEMD_DIR..."
 mkdir -p "$SYSTEMD_DIR"

@@ -32,6 +32,8 @@ clean:
 install: build
 	install -Dm755 target/release/escucha $(HOME)/.local/bin/escucha
 	install -Dm644 systemd/escucha.service $(HOME)/.config/systemd/user/escucha.service
+	install -Dm644 io.github.escucha.desktop $(HOME)/.local/share/applications/io.github.escucha.desktop
+	install -Dm644 assets/io.github.escucha.svg $(HOME)/.local/share/icons/hicolor/scalable/apps/io.github.escucha.svg
 
 # Run all CI checks locally
 ci: fmt clippy test
