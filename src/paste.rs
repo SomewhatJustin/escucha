@@ -96,13 +96,18 @@ pub fn ensure_ydotoold_running() -> bool {
         return true;
     }
 
+    // First-run friendly path: persistently enable and start the user service.
     let started = Command::new("systemctl")
-        .args(["--user", "start", "ydotoold.service"])
+        .args(["--user", "enable", "--now", "ydotoold.service"])
         .status()
         .is_ok_and(|s| s.success());
-    if started {
-        std::thread::sleep(std::time::Duration::from_millis(200));
+    if !started {
+        // Fallback to a plain start for environments where enable is restricted.
+        let _ = Command::new("systemctl")
+            .args(["--user", "start", "ydotoold.service"])
+            .status();
     }
+    std::thread::sleep(std::time::Duration::from_millis(200));
 
     ydotool_socket_available()
 }
@@ -248,7 +253,9 @@ fn clipboard_paste_wayland(text: &str, hotkey: &str, delay_ms: u32) -> Result<()
         .context("Failed to simulate paste with wtype")?;
 
     if !status.success() {
-        log::warn!("wtype key simulation failed (compositor may not support virtual keyboard). Text copied to clipboard - paste manually with Ctrl+V");
+        log::warn!(
+            "wtype key simulation failed (compositor may not support virtual keyboard). Text copied to clipboard - paste manually with Ctrl+V"
+        );
         return Ok(()); // Don't fail - clipboard copy succeeded
     }
     Ok(())
@@ -327,14 +334,14 @@ fn parse_hotkey_to_wtype(hotkey: &str) -> Vec<String> {
 /// Map a key name to a Linux evdev key code for ydotool.
 fn key_name_to_code(name: &str) -> Option<&'static str> {
     match name.to_lowercase().as_str() {
-        "ctrl" => Some("29"),        // KEY_LEFTCTRL
-        "shift" => Some("42"),       // KEY_LEFTSHIFT
-        "alt" => Some("56"),         // KEY_LEFTALT
+        "ctrl" => Some("29"),            // KEY_LEFTCTRL
+        "shift" => Some("42"),           // KEY_LEFTSHIFT
+        "alt" => Some("56"),             // KEY_LEFTALT
         "super" | "meta" => Some("125"), // KEY_LEFTMETA
-        "v" => Some("47"),           // KEY_V
-        "c" => Some("46"),           // KEY_C
-        "a" => Some("30"),           // KEY_A
-        "z" => Some("44"),           // KEY_Z
+        "v" => Some("47"),               // KEY_V
+        "c" => Some("46"),               // KEY_C
+        "a" => Some("30"),               // KEY_A
+        "z" => Some("44"),               // KEY_Z
         _ => None,
     }
 }
@@ -399,10 +406,7 @@ mod tests {
     #[test]
     fn test_parse_hotkey_to_ydotool_ctrl_shift_v() {
         let args = parse_hotkey_to_ydotool("ctrl+shift+v");
-        assert_eq!(
-            args,
-            vec!["29:1", "42:1", "47:1", "47:0", "42:0", "29:0"]
-        );
+        assert_eq!(args, vec!["29:1", "42:1", "47:1", "47:0", "42:0", "29:0"]);
     }
 
     #[test]

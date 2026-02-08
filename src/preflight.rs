@@ -117,9 +117,7 @@ fn check_input_access() -> CheckResult {
                 passed: false,
                 severity: CheckSeverity::Critical,
                 message: "Cannot read /dev/input".into(),
-                hint: Some(
-                    "sudo usermod -aG input $USER  (then log out and back in)".into(),
-                ),
+                hint: Some("sudo usermod -aG input $USER  (then log out and back in)".into()),
             };
         }
     };
@@ -308,11 +306,7 @@ fn check_curl() -> CheckResult {
 }
 
 /// Check if a directory can be created/accessed.
-fn check_directory(
-    name: &'static str,
-    path: PathBuf,
-    severity: CheckSeverity,
-) -> CheckResult {
+fn check_directory(name: &'static str, path: PathBuf, severity: CheckSeverity) -> CheckResult {
     match std::fs::create_dir_all(&path) {
         Ok(()) if path.is_dir() => CheckResult {
             name,

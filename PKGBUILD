@@ -1,7 +1,7 @@
 # Maintainer: Justin <justin@example.com>
 pkgname=escucha
-pkgver=0.2.1
-pkgrel=3
+pkgver=0.2.2
+pkgrel=1
 pkgdesc="Hold-to-talk speech-to-text for Linux"
 arch=('x86_64')
 url="https://github.com/SomewhatJustin/escucha"

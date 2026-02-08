@@ -42,6 +42,7 @@ pub mod qobject {
 use core::pin::Pin;
 use cxx_qt::{CxxQtType, Threading};
 use cxx_qt_lib::QString;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -78,6 +79,144 @@ fn restart_app() {
     std::process::exit(0);
 }
 
+const FIRST_RUN_MARKER: &str = "first-run-onboarding-v1.done";
+
+fn escucha_state_dir() -> PathBuf {
+    dirs::state_dir()
+        .unwrap_or_else(|| PathBuf::from("~/.local/state"))
+        .join("escucha")
+}
+
+fn first_run_marker_path() -> PathBuf {
+    escucha_state_dir().join(FIRST_RUN_MARKER)
+}
+
+fn is_first_launch() -> bool {
+    !first_run_marker_path().exists()
+}
+
+fn mark_first_launch_complete() {
+    let marker = first_run_marker_path();
+    if let Some(dir) = marker.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let _ = std::fs::write(marker, b"ok\n");
+}
+
+fn user_listed_in_input_group(user: &str) -> bool {
+    if user.is_empty() {
+        return false;
+    }
+
+    let Ok(groups) = std::fs::read_to_string("/etc/group") else {
+        return false;
+    };
+
+    groups.lines().any(|line| {
+        if !line.starts_with("input:") {
+            return false;
+        }
+        let members = line.split(':').nth(3).unwrap_or_default();
+        members.split(',').any(|m| m.trim() == user)
+    })
+}
+
+fn attempt_input_permission_fix(qt_thread: cxx_qt::CxxQtThread<qobject::EscuchaBackend>) -> bool {
+    let user = std::env::var("USER").unwrap_or_default();
+    if user.is_empty() {
+        let _ = qt_thread.queue(move |mut qobject| {
+            qobject
+                .as_mut()
+                .error_occurred(QString::from("Could not determine current username"));
+        });
+        return false;
+    }
+
+    // If /etc/group already has the user but this session still lacks access,
+    // no privilege prompt is needed; user must start a fresh desktop session.
+    if user_listed_in_input_group(&user) {
+        let _ = qt_thread.queue(move |mut qobject| {
+            qobject.as_mut().set_show_fix_button(true);
+            qobject.as_mut().set_status_detail(QString::from(
+                "Input group already granted. Log out and back in to apply it to GUI apps.",
+            ));
+            qobject.as_mut().error_occurred(QString::from(
+                "Input permission pending session refresh. Log out and back in.",
+            ));
+        });
+        return false;
+    }
+
+    let ok = std::process::Command::new("pkexec")
+        .args(["usermod", "-aG", "input", &user])
+        .status()
+        .is_ok_and(|s| s.success());
+
+    if ok {
+        let has_sg = which::which("sg").is_ok();
+        let _ = qt_thread.queue(move |mut qobject| {
+            qobject.as_mut().set_show_fix_button(false);
+            if has_sg {
+                qobject.as_mut().set_status_detail(QString::from(
+                    "Input permission granted; restarting with new group...",
+                ));
+            } else {
+                qobject.as_mut().set_status_detail(QString::from(
+                    "Input permission granted. Log out and back in to apply.",
+                ));
+            }
+        });
+
+        if has_sg {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            restart_app();
+            return true;
+        }
+    } else {
+        let _ = qt_thread.queue(move |mut qobject| {
+            qobject.as_mut().set_show_fix_button(true);
+            qobject
+                .as_mut()
+                .error_occurred(QString::from("Input permission request was denied"));
+        });
+    }
+
+    false
+}
+
+fn first_launch_onboarding(qt_thread: &cxx_qt::CxxQtThread<qobject::EscuchaBackend>) {
+    if !is_first_launch() {
+        return;
+    }
+
+    let _ = qt_thread.queue(move |mut qobject| {
+        qobject
+            .as_mut()
+            .set_status_detail(QString::from("Running first-launch setup checks..."));
+    });
+
+    // Best effort: make sure paste service is enabled/running up front.
+    let _ = crate::paste::ensure_ydotoold_running();
+
+    let report = crate::preflight::check_environment();
+    let input_failed = report
+        .checks
+        .iter()
+        .any(|c| c.name == "input devices" && !c.passed);
+
+    if input_failed {
+        let _ = qt_thread.queue(move |mut qobject| {
+            qobject.as_mut().set_show_fix_button(true);
+            qobject.as_mut().set_status_detail(QString::from(
+                "Escucha needs input permissions. Requesting them now...",
+            ));
+        });
+        let _ = attempt_input_permission_fix(qt_thread.clone());
+    }
+
+    mark_first_launch_complete();
+}
+
 #[derive(Default)]
 pub struct EscuchaBackendRust {
     status_text: QString,
@@ -96,49 +235,9 @@ pub struct EscuchaBackendRust {
 
 impl qobject::EscuchaBackend {
     pub fn fix_permissions(self: Pin<&mut Self>) {
-        let user = std::env::var("USER").unwrap_or_default();
-        if user.is_empty() {
-            self.error_occurred(QString::from("Could not determine current username"));
-            return;
-        }
-
         let qt_thread = self.qt_thread();
         std::thread::spawn(move || {
-            let ok = std::process::Command::new("pkexec")
-                .args(["usermod", "-aG", "input", &user])
-                .status()
-                .is_ok_and(|s| s.success());
-
-            if ok {
-                let has_sg = which::which("sg").is_ok();
-                let _ = qt_thread.queue(move |mut qobject| {
-                    qobject.as_mut().set_show_fix_button(false);
-                    if has_sg {
-                        qobject
-                            .as_mut()
-                            .set_status_detail(QString::from(
-                                "Permissions granted \u{2014} restarting with new group...",
-                            ));
-                    } else {
-                        qobject
-                            .as_mut()
-                            .set_status_detail(QString::from(
-                                "Permissions granted \u{2014} log out and back in to apply",
-                            ));
-                    }
-                });
-
-                if has_sg {
-                    std::thread::sleep(std::time::Duration::from_secs(2));
-                    restart_app();
-                }
-            } else {
-                let _ = qt_thread.queue(move |mut qobject| {
-                    qobject.as_mut().error_occurred(QString::from(
-                        "Permission request denied or failed",
-                    ));
-                });
-            }
+            let _ = attempt_input_permission_fix(qt_thread);
         });
     }
 
@@ -177,8 +276,7 @@ impl qobject::EscuchaBackend {
 
 impl cxx_qt::Initialize for qobject::EscuchaBackend {
     fn initialize(mut self: Pin<&mut Self>) {
-        self.as_mut()
-            .set_status_text(QString::from("Starting..."));
+        self.as_mut().set_status_text(QString::from("Starting..."));
         self.as_mut()
             .set_status_icon_name(QString::from("audio-input-microphone-symbolic"));
         self.as_mut().set_show_spinner(true);
@@ -193,6 +291,8 @@ impl cxx_qt::Initialize for qobject::EscuchaBackend {
 }
 
 fn run_service_thread(qt_thread: cxx_qt::CxxQtThread<qobject::EscuchaBackend>) {
+    first_launch_onboarding(&qt_thread);
+
     // Run preflight checks
     let report = crate::preflight::check_environment();
     if report.has_critical_failures() {
@@ -216,9 +316,7 @@ fn run_service_thread(qt_thread: cxx_qt::CxxQtThread<qobject::EscuchaBackend>) {
             .unwrap_or_default();
 
         let _ = qt_thread.queue(move |mut qobject| {
-            qobject
-                .as_mut()
-                .set_status_text(QString::from("Stopped"));
+            qobject.as_mut().set_status_text(QString::from("Stopped"));
             qobject.as_mut().set_show_spinner(false);
             qobject.as_mut().set_is_stopped(true);
             qobject
@@ -250,9 +348,7 @@ fn run_service_thread(qt_thread: cxx_qt::CxxQtThread<qobject::EscuchaBackend>) {
                     None => format!("{}: {}", check.name, check.message),
                 };
                 let _ = qt_thread.queue(move |mut qobject| {
-                    qobject
-                        .as_mut()
-                        .error_occurred(QString::from(msg.as_str()));
+                    qobject.as_mut().error_occurred(QString::from(msg.as_str()));
                 });
             }
         }
@@ -263,17 +359,13 @@ fn run_service_thread(qt_thread: cxx_qt::CxxQtThread<qobject::EscuchaBackend>) {
         Err(e) => {
             let msg = format!("Config error: {e}");
             let _ = qt_thread.queue(move |mut qobject| {
-                qobject
-                    .as_mut()
-                    .set_status_text(QString::from("Stopped"));
+                qobject.as_mut().set_status_text(QString::from("Stopped"));
                 qobject.as_mut().set_show_spinner(false);
                 qobject.as_mut().set_is_stopped(true);
                 qobject
                     .as_mut()
                     .set_status_icon_name(QString::from("microphone-disabled-symbolic"));
-                qobject
-                    .as_mut()
-                    .error_occurred(QString::from(msg.as_str()));
+                qobject.as_mut().error_occurred(QString::from(msg.as_str()));
             });
             return;
         }
@@ -306,17 +398,13 @@ fn run_service_thread(qt_thread: cxx_qt::CxxQtThread<qobject::EscuchaBackend>) {
         Err(e) => {
             let msg = format!("{e}");
             let _ = qt_thread.queue(move |mut qobject| {
-                qobject
-                    .as_mut()
-                    .set_status_text(QString::from("Stopped"));
+                qobject.as_mut().set_status_text(QString::from("Stopped"));
                 qobject.as_mut().set_show_spinner(false);
                 qobject.as_mut().set_is_stopped(true);
                 qobject
                     .as_mut()
                     .set_status_icon_name(QString::from("microphone-disabled-symbolic"));
-                qobject
-                    .as_mut()
-                    .error_occurred(QString::from(msg.as_str()));
+                qobject.as_mut().error_occurred(QString::from(msg.as_str()));
             });
         }
     }
@@ -336,9 +424,7 @@ impl ServiceCallbacks for BridgeCallbacks {
 
             match status {
                 ServiceStatus::Stopped => {
-                    qobject
-                        .as_mut()
-                        .set_status_text(QString::from("Stopped"));
+                    qobject.as_mut().set_status_text(QString::from("Stopped"));
                     qobject.as_mut().set_show_spinner(false);
                     qobject.as_mut().set_is_stopped(true);
                     qobject
@@ -356,9 +442,7 @@ impl ServiceCallbacks for BridgeCallbacks {
                         .set_status_icon_name(QString::from("audio-input-microphone-symbolic"));
                 }
                 ServiceStatus::Ready => {
-                    qobject
-                        .as_mut()
-                        .set_status_text(QString::from("Ready"));
+                    qobject.as_mut().set_status_text(QString::from("Ready"));
                     qobject.as_mut().set_show_spinner(false);
                     qobject.as_mut().set_is_ready(true);
                     qobject
