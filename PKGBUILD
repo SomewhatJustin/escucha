@@ -1,15 +1,13 @@
 # Maintainer: Justin <justin@example.com>
 pkgname=escucha
 pkgver=0.2.1
-pkgrel=2
+pkgrel=3
 pkgdesc="Hold-to-talk speech-to-text for Linux"
 arch=('x86_64')
 url="https://github.com/SomewhatJustin/escucha"
 license=('MIT')
-depends=('alsa-utils' 'qt6-base' 'qt6-declarative')
+depends=('alsa-utils' 'qt6-base' 'qt6-declarative' 'ydotool' 'wl-clipboard')
 optdepends=(
-    'ydotool: Wayland/KDE automatic pasting'
-    'wl-clipboard: Wayland clipboard support'
     'wtype: Wayland virtual-keyboard paste support'
     'xdotool: X11 paste/key simulation'
     'xclip: X11 clipboard support'
