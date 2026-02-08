@@ -1,6 +1,6 @@
 # Maintainer: Justin <justin@example.com>
 pkgname=escucha
-pkgver=0.2.4
+pkgver=0.2.5
 pkgrel=1
 pkgdesc="Hold-to-talk speech-to-text for Linux"
 arch=('x86_64')

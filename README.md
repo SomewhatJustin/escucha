@@ -238,6 +238,11 @@ ydotoold &
 - Wayland (KDE/most compositors): Install `ydotool` and `wl-clipboard`
 - Wayland (Sway/Hyprland): Install `wtype` and `wl-clipboard`
 
+**"ydotoold failed to open uinput"**
+- Use tray action: `Fix Paste Setup` (recommended)
+- Or manually: ensure `/dev/uinput` is writable by group `input` and restart the service:
+  `systemctl --user enable --now ydotoold.service`
+
 **Key not detected**
 - Run `escucha --list-devices` to verify input access
 - Use `escucha --list-devices` and set a known key like `KEY_RIGHTCTRL` in config

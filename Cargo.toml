@@ -1,6 +1,6 @@
 [package]
 name = "escucha"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2024"
 description = "Hold-to-talk speech-to-text for Linux"
 license = "MIT"

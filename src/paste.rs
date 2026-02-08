@@ -90,9 +90,30 @@ pub fn ydotool_socket_available() -> bool {
     ydotool_socket_path_candidates().iter().any(|p| p.exists())
 }
 
+fn ydotoold_service_active() -> bool {
+    Command::new("systemctl")
+        .args(["--user", "is-active", "ydotoold.service"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success())
+}
+
+pub fn ydotool_ready() -> bool {
+    ydotool_socket_available() || ydotoold_service_active()
+}
+
+pub fn uinput_accessible() -> bool {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/uinput")
+        .is_ok()
+}
+
 /// Best-effort startup of ydotoold for desktop sessions where the user has installed a user unit.
 pub fn ensure_ydotoold_running() -> bool {
-    if ydotool_socket_available() {
+    if ydotool_ready() {
         return true;
     }
 
@@ -104,7 +125,7 @@ pub fn ensure_ydotoold_running() -> bool {
     }
     std::thread::sleep(std::time::Duration::from_millis(200));
 
-    ydotool_socket_available()
+    ydotool_ready()
 }
 
 fn run_systemctl_user<const N: usize>(args: [&str; N]) -> bool {
@@ -115,6 +136,68 @@ fn run_systemctl_user<const N: usize>(args: [&str; N]) -> bool {
         .stderr(Stdio::null())
         .status()
         .is_ok_and(|s| s.success())
+}
+
+fn validated_current_user() -> Result<String> {
+    let user = std::env::var("USER").unwrap_or_default();
+    if user.is_empty() {
+        bail!("Could not determine current username");
+    }
+    if !user
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        bail!("Refusing to use unsafe username in privileged setup");
+    }
+    Ok(user)
+}
+
+/// Privileged best-effort repair for systems where /dev/uinput is not user-accessible.
+/// This installs an udev rule, ensures input-group membership, and reloads udev.
+pub fn repair_uinput_permissions() -> Result<()> {
+    let user = validated_current_user()?;
+    let script = format!(
+        "set -e; \
+         install -d /etc/udev/rules.d; \
+         cat > /etc/udev/rules.d/80-escucha-uinput.rules <<'EOF'\n\
+KERNEL==\"uinput\", GROUP=\"input\", MODE=\"0660\", OPTIONS+=\"static_node=uinput\"\n\
+EOF\n\
+         usermod -aG input {user}; \
+         udevadm control --reload-rules || true; \
+         udevadm trigger --name-match=uinput || true; \
+         if [ -e /dev/uinput ]; then chgrp input /dev/uinput || true; chmod 0660 /dev/uinput || true; fi"
+    );
+
+    let status = Command::new("pkexec")
+        .args(["/bin/sh", "-c", &script])
+        .status()
+        .context("Failed to run pkexec for /dev/uinput repair")?;
+
+    if !status.success() {
+        bail!("Privileged setup was denied or failed");
+    }
+
+    Ok(())
+}
+
+/// End-to-end paste setup repair used by the GUI action:
+/// 1) try starting ydotoold as-is
+/// 2) if unavailable and /dev/uinput is blocked, request privileged repair
+/// 3) retry ydotoold startup
+pub fn repair_paste_setup() -> Result<()> {
+    if ensure_ydotoold_running() {
+        return Ok(());
+    }
+
+    if !uinput_accessible() {
+        repair_uinput_permissions()?;
+    }
+
+    if ensure_ydotoold_running() {
+        Ok(())
+    } else {
+        bail!("Could not start ydotoold after repair");
+    }
 }
 
 /// Paste text using the configured method.

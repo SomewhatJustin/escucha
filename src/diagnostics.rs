@@ -37,6 +37,9 @@ struct PermissionInfo {
     input_group_active_in_process: bool,
     readable_input_devices: usize,
     total_input_devices: usize,
+    uinput_accessible: bool,
+    uinput_mode: Option<String>,
+    ydotool_ready: bool,
     ydotool_socket_available: bool,
 }
 
@@ -172,6 +175,9 @@ fn collect_permissions() -> PermissionInfo {
         input_group_active_in_process,
         readable_input_devices,
         total_input_devices,
+        uinput_accessible: paste::uinput_accessible(),
+        uinput_mode: uinput_mode_string(),
+        ydotool_ready: paste::ydotool_ready(),
         ydotool_socket_available: paste::ydotool_socket_available(),
     }
 }
@@ -571,6 +577,17 @@ fn input_device_readability() -> (usize, usize) {
     }
 
     (readable, total)
+}
+
+fn uinput_mode_string() -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::metadata("/dev/uinput").ok()?;
+    Some(format!(
+        "{:o} uid:{} gid:{}",
+        meta.mode() & 0o777,
+        meta.uid(),
+        meta.gid()
+    ))
 }
 
 fn step_pass(

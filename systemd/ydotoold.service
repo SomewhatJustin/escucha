@@ -4,7 +4,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/ydotoold
+ExecStart=/usr/bin/sg input -c /usr/bin/ydotoold
 Restart=on-failure
 RestartSec=5
 

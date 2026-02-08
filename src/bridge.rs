@@ -58,13 +58,23 @@ pub fn strip_device_prefix(label: &str) -> &str {
     }
 }
 
+const SG_REEXEC_ENV: &str = "ESCUCHA_SG_REEXECED";
+
+fn shell_quote(arg: &str) -> String {
+    let escaped = arg.replace('\'', "'\"'\"'");
+    format!("'{escaped}'")
+}
+
 /// Restart the application by re-executing itself with the new group membership active.
 fn restart_app() {
     let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("escucha"));
     let args: Vec<String> = std::env::args().collect();
 
-    let mut cmd_parts = vec![exe.to_string_lossy().to_string()];
-    cmd_parts.extend(args[1..].iter().map(|s| s.to_string()));
+    let mut cmd_parts = vec![
+        format!("{SG_REEXEC_ENV}=1"),
+        shell_quote(&exe.to_string_lossy()),
+    ];
+    cmd_parts.extend(args[1..].iter().map(|s| shell_quote(s)));
     let full_cmd = cmd_parts.join(" ");
 
     let success = std::process::Command::new("sg")
@@ -72,7 +82,7 @@ fn restart_app() {
         .spawn()
         .is_ok();
 
-    if !success {
+    if !success && std::env::var(SG_REEXEC_ENV).unwrap_or_default() != "1" {
         let _ = std::process::Command::new(&exe).args(&args[1..]).spawn();
     }
 
@@ -131,24 +141,54 @@ fn attempt_input_permission_fix(qt_thread: cxx_qt::CxxQtThread<qobject::EscuchaB
         });
         return false;
     }
-
-    // If /etc/group already has the user but this session still lacks access,
-    // no privilege prompt is needed; user must start a fresh desktop session.
-    if user_listed_in_input_group(&user) {
+    if !user
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
         let _ = qt_thread.queue(move |mut qobject| {
-            qobject.as_mut().set_show_fix_button(true);
-            qobject.as_mut().set_status_detail(QString::from(
-                "Input group already granted. Log out and back in to apply it to GUI apps.",
-            ));
             qobject.as_mut().error_occurred(QString::from(
-                "Input permission pending session refresh. Log out and back in.",
+                "Unsafe username; cannot run privileged setup",
             ));
         });
         return false;
     }
 
+    // If /etc/group already has the user but this session still lacks access,
+    // first try a self re-exec under `sg input` before asking for logout.
+    if user_listed_in_input_group(&user) {
+        let has_sg = which::which("sg").is_ok();
+        let already_reexeced = std::env::var(SG_REEXEC_ENV).unwrap_or_default() == "1";
+        if has_sg && !already_reexeced {
+            let _ = qt_thread.queue(move |mut qobject| {
+                qobject.as_mut().set_show_fix_button(false);
+                qobject.as_mut().set_status_detail(QString::from(
+                    "Input group already granted. Restarting under input group...",
+                ));
+            });
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            restart_app();
+            return true;
+        }
+
+        let _ = qt_thread.queue(move |mut qobject| {
+            qobject.as_mut().set_show_fix_button(true);
+            qobject.as_mut().set_status_detail(QString::from(
+                "Input group already granted. Log out and back in if access is still denied.",
+            ));
+            qobject.as_mut().error_occurred(QString::from(
+                "Input permission still pending session refresh.",
+            ));
+        });
+        return false;
+    }
+
+    let script = format!(
+        "set -e; \
+         usermod -aG input {user}; \
+         if command -v setfacl >/dev/null 2>&1; then setfacl -m u:{user}:rw /dev/input/event* || true; fi"
+    );
     let ok = std::process::Command::new("pkexec")
-        .args(["usermod", "-aG", "input", &user])
+        .args(["/bin/sh", "-c", &script])
         .status()
         .is_ok_and(|s| s.success());
 
@@ -261,7 +301,7 @@ impl qobject::EscuchaBackend {
     pub fn fix_paste_setup(self: Pin<&mut Self>) {
         let qt_thread = self.qt_thread();
         std::thread::spawn(move || {
-            let ok = crate::paste::ensure_ydotoold_running();
+            let ok = crate::paste::repair_paste_setup().is_ok();
             let _ = qt_thread.queue(move |mut qobject| {
                 if ok {
                     qobject.as_mut().set_show_paste_fix_button(false);
@@ -277,7 +317,7 @@ impl qobject::EscuchaBackend {
                     std::process::exit(0);
                 } else {
                     qobject.as_mut().error_occurred(QString::from(
-                        "Could not start ydotoold. Run: systemctl --user enable --now ydotoold.service",
+                        "Could not fix paste setup automatically. Please verify /dev/uinput access and run: systemctl --user enable --now ydotoold.service",
                     ));
                 }
             });
