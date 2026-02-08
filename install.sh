@@ -136,7 +136,7 @@ if ! groups | grep -q "\binput\b"; then
     if [[ ! $REPLY =~ ^[Nn]$ ]]; then
         sudo usermod -aG input "$USER"
         echo "Added to input group. You'll need to log out and back in."
-        echo "(Or use the GUI's 'Fix Input Permissions' button to restart with the group active)"
+        echo "(Or use the tray app's 'Fix Input Permissions' action to restart with the group active)"
     fi
 fi
 
@@ -146,7 +146,7 @@ echo ""
 echo "Test the environment:"
 echo "  escucha --check"
 echo ""
-echo "Run the GUI:"
+echo "Run the tray app:"
 echo "  escucha --gui"
 echo ""
 echo "Enable as a service:"

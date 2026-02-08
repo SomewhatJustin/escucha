@@ -6,12 +6,10 @@ description = "Hold-to-talk speech-to-text for Linux"
 license = "MIT"
 
 [dependencies]
-# GUI
-gtk4 = { version = "0.10", features = ["v4_18"] }
-libadwaita = { version = "0.8", package = "libadwaita", features = ["v1_6"] }
-
-# Async channels (for GUI ↔ service thread communication)
-async-channel = "2"
+# GUI (cxx-qt / Kirigami)
+cxx = "1.0"
+cxx-qt = "0.7"
+cxx-qt-lib = { version = "0.7", features = ["qt_full"] }
 
 # Speech-to-text (whisper.cpp bindings)
 whisper-rs = "0.14"
@@ -43,6 +41,9 @@ which = "7"
 nix = { version = "0.29", features = ["signal", "process", "poll"] }
 libc = "0.2"
 dirs = "6"
+
+[build-dependencies]
+cxx-qt-build = { version = "0.7", features = ["link_qt_object_files"] }
 
 [dev-dependencies]
 tempfile = "3"

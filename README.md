@@ -21,27 +21,46 @@ What it does:
 - Wayland (alternative): `wtype` + `wl-clipboard` (for compositors with virtual keyboard support)
 
 **Optional:**
-- GTK4 + libadwaita (for troubleshooting GUI)
+- Qt6 system tray integration packages (usually installed with `qt6-base` + `qt6-declarative`)
 
 ### System packages
 
 **Fedora:**
 ```bash
-sudo dnf install -y rust cargo alsa-utils gtk4-devel libadwaita-devel \
-  wl-clipboard ydotool xdotool xclip
+sudo dnf install -y rust cargo alsa-utils qt6-qtbase-devel qt6-qtdeclarative-devel \
+  wl-clipboard ydotool xdotool xclip curl
 ```
 
 **Ubuntu/Debian:**
 ```bash
-sudo apt install -y cargo rustc alsa-utils libgtk-4-dev libadwaita-1-dev \
-  wl-clipboard ydotool xdotool xclip
+sudo apt install -y cargo rustc alsa-utils qt6-base-dev qt6-declarative-dev \
+  wl-clipboard ydotool xdotool xclip curl
 ```
 
-**Arch:**
+**Arch (manual dependencies):**
 ```bash
-sudo pacman -S --needed rust alsa-utils gtk4 libadwaita \
-  wl-clipboard ydotool xdotool xclip
+sudo pacman -S --needed base-devel git rust alsa-utils \
+  qt6-base qt6-declarative qt6-tools \
+  wl-clipboard ydotool wtype xdotool xclip curl
 ```
+
+## Arch / AUR-Style Install
+
+This repository includes a `PKGBUILD`, so you can emulate the AUR user flow directly:
+
+```bash
+git clone https://github.com/SomewhatJustin/escucha.git
+cd escucha
+makepkg -si
+```
+
+`makepkg -si` means:
+- `-s`: install missing dependencies from repos
+- `-i`: install the package after build
+
+After install:
+- Launch tray app: `escucha --gui`
+- KRunner launcher: `Escucha`
 
 ## Build & Install
 
@@ -76,7 +95,7 @@ The app needs access to `/dev/input/event*` devices. Add your user to the `input
 sudo usermod -aG input $USER
 ```
 
-Then **log out and back in** (or use the GUI's "Fix Input Permissions" button to auto-restart).
+Then **log out and back in** (or use the tray app's "Fix Input Permissions" action to auto-restart).
 
 ## Usage
 
@@ -98,13 +117,13 @@ escucha
 
 Runs in the background. Hold Right Ctrl and speak to transcribe.
 
-### Troubleshooting GUI
+### Tray App
 
 ```bash
 escucha --gui
 ```
 
-Shows status, transcription results, and offers permission fixes if needed.
+Runs as a system tray app and shows status/error notifications.
 
 ### List input devices
 
@@ -151,7 +170,7 @@ Common dictation keys:
 - `KEY_F13` through `KEY_F24`
 - `KEY_PAUSE`, `KEY_SCROLLLOCK`, `KEY_INSERT`
 
-Use `escucha --list-devices` to see your keyboard, then test keys with the GUI.
+Use `escucha --list-devices` to see your keyboard and confirm detected device names.
 
 ## Whisper models
 
@@ -189,7 +208,7 @@ ydotoold &
 **"Setup required: input devices"**
 - Add user to input group: `sudo usermod -aG input $USER`
 - Log out and back in
-- Or use the GUI "Fix Input Permissions" button
+- Or use the tray app's "Fix Input Permissions" action
 
 **"arecord not found"**
 - Install `alsa-utils`: `sudo dnf install alsa-utils`
@@ -201,7 +220,7 @@ ydotoold &
 
 **Key not detected**
 - Run `escucha --list-devices` to verify input access
-- Use the GUI to test which key code your keyboard sends
+- Use `escucha --list-devices` and set a known key like `KEY_RIGHTCTRL` in config
 - Some keyboards don't emit `KEY_FN` - use `KEY_RIGHTCTRL` or a function key
 
 **Paste fails**
@@ -233,6 +252,17 @@ RUST_LOG=debug cargo run -- --gui
 # Check environment
 cargo run -- --check
 ```
+
+## AUR Maintainer Notes
+
+When preparing an AUR update:
+
+```bash
+# after updating PKGBUILD values (pkgver/pkgrel/source/checksums)
+makepkg --printsrcinfo > .SRCINFO
+```
+
+AUR submission itself uses a separate AUR git repo containing `PKGBUILD` and `.SRCINFO`.
 
 ## License
 

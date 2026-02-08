@@ -8,7 +8,7 @@ struct Cli {
     #[arg(long)]
     list_devices: bool,
 
-    /// Launch the troubleshooting GUI
+    /// Launch the toolbar (system tray) app
     #[arg(long)]
     gui: bool,
 

@@ -11,11 +11,13 @@ src/
 ├── main.rs          CLI entry point (--gui, --check, --list-devices)
 ├── lib.rs           Module exports
 ├── audio.rs         arecord wrapper + WAV file management
+├── bridge.rs        cxx-qt QObject bridge (EscuchaBackend ↔ QML)
 ├── config.rs        INI config loading (rust-ini)
-├── gui.rs           GTK4/libadwaita troubleshooting UI
+├── gui.rs           Qt/QML application launcher (~20 lines)
 ├── input.rs         evdev keyboard device management + key resolution
 ├── paste.rs         Multi-method text pasting (xdotool/wtype/wl-copy)
 ├── preflight.rs     Environment validation (permissions, tools, dirs)
+├── qml/Main.qml     Kirigami UI layout
 ├── service.rs       Main dictation service + daemon mode
 └── transcribe.rs    Whisper.cpp model loading + transcription
 ```
@@ -31,12 +33,16 @@ src/
 - Release: stops recording, transcribes, pastes, cleans up
 - Supports graceful shutdown via AtomicBool flag
 
-### GUI (`gui.rs`)
+### GUI (`gui.rs` + `bridge.rs` + `qml/Main.qml`)
 
-- GTK4 + libadwaita with async message passing
-- Service runs in background thread, sends status/text/error messages
-- Shows visual status (spinner/icon), transcription results, and error toasts
-- Preflight checks run on startup - critical failures show "Fix Input Permissions" button
+- **Kirigami** (KDE QML framework) via **cxx-qt** (Rust↔Qt bridge)
+- `bridge.rs`: `EscuchaBackend` QObject with properties, signals, and invokable methods
+- `qml/Main.qml`: Kirigami.ApplicationWindow layout bound to EscuchaBackend properties
+- `gui.rs`: Minimal launcher — creates QGuiApplication + QQmlApplicationEngine, loads QML
+- Service runs in background thread spawned during `cxx_qt::Initialize`
+- Property updates pushed from service thread via `CxxQtThread::queue()` (thread-safe)
+- Error signal (`error_occurred`) drives `showPassiveNotification()` in QML
+- Preflight checks run on startup — critical failures show "Fix Input Permissions" button
 - Button click runs `pkexec usermod -aG input $USER`, then restarts app with `sg input -c ...`
 
 ### Preflight (`preflight.rs`)
@@ -110,18 +116,19 @@ Test coverage:
 
 ### Modifying GUI layout
 
-- Widget tree starts at `build_ui()` in `gui.rs`
-- Status area: icon stack (icon/spinner), status label, status detail, fix button
-- Transcription area: scrollable label with word-wrap
-- Toast overlay handles error messages
-- CSS in const `CSS` at top of file
+- QML layout is in `src/qml/Main.qml` (Kirigami.ApplicationWindow → Kirigami.Page → ColumnLayout)
+- Status area: Kirigami.Icon / BusyIndicator, status labels, fix button
+- Transcription area: "Last transcription" header + scrollable read-only TextArea
+- Errors shown via `showPassiveNotification()` driven by `errorOccurred` signal
+- Backend properties are in `src/bridge.rs` — add new `#[qproperty]` attributes there
+- Status transitions mapped in `BridgeCallbacks::on_status()` in bridge.rs
 
 ## Error Handling
 
 - Use `anyhow::Result<T>` for fallible functions
 - Use `anyhow::bail!()` for early returns with error messages
 - Wrap errors with context: `.context("Failed to do X")?`
-- GUI errors sent as `ServiceMessage::Error` → shown as toasts
+- GUI errors emitted as `error_occurred` signal → shown as passive notifications in QML
 - Daemon errors logged to stderr via `log::error!()`
 
 ## Dependencies
@@ -130,7 +137,7 @@ Test coverage:
 - `whisper-rs`: Whisper.cpp Rust bindings
 - `evdev`: Linux input device access
 - `hound`: WAV file reading
-- `gtk4` + `libadwaita`: GUI framework
+- `cxx-qt` + `cxx-qt-lib`: Rust↔Qt/QML bridge (Kirigami UI)
 - `clap`: CLI argument parsing
 - `rust-ini`: Config file parsing
 

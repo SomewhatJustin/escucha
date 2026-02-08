@@ -1,0 +1,11 @@
+#!/bin/bash
+set -e
+
+echo "==> Building escucha (release)..."
+cargo build --release
+
+echo "==> Installing binary to ~/.local/bin..."
+install -m755 target/release/escucha "$HOME/.local/bin/escucha"
+
+echo "==> Launching escucha --gui"
+exec "$HOME/.local/bin/escucha" --gui

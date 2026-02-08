@@ -77,12 +77,14 @@ fn is_available(cmd: &str) -> bool {
 }
 
 /// Paste text using the configured method.
+/// Appends a trailing space so consecutive dictations don't run together.
 pub fn paste_text(text: &str, config: &PasteConfig) -> Result<()> {
+    let text = format!("{text} ");
     match config.method {
-        PasteMethod::Xdotool => paste_xdotool(text, config),
-        PasteMethod::Wtype => paste_wtype(text, config),
-        PasteMethod::Ydotool => paste_ydotool(text, config),
-        PasteMethod::WlCopy => paste_wl_copy_only(text),
+        PasteMethod::Xdotool => paste_xdotool(&text, config),
+        PasteMethod::Wtype => paste_wtype(&text, config),
+        PasteMethod::Ydotool => paste_ydotool(&text, config),
+        PasteMethod::WlCopy => paste_wl_copy_only(&text),
     }
 }
 

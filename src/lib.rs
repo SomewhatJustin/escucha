@@ -1,6 +1,8 @@
 pub mod audio;
+pub mod bridge;
 pub mod config;
 pub mod gui;
+mod gui_bridge;
 pub mod input;
 pub mod paste;
 pub mod preflight;
