@@ -1,7 +1,7 @@
 # Maintainer: Justin <justin@example.com>
 pkgname=escucha
 pkgver=0.2.1
-pkgrel=1
+pkgrel=2
 pkgdesc="Hold-to-talk speech-to-text for Linux"
 arch=('x86_64')
 url="https://github.com/SomewhatJustin/escucha"
@@ -24,17 +24,21 @@ sha256sums=('SKIP'
             '803d4f1d1075d8ffe8cdf87c22454115f82042866daa0905396d03219b541829')
 
 build() {
-    cd "$pkgname-$pkgver"
+    cd "$srcdir/$pkgname-$pkgver" || return 1
+    cargo clean
+    # Arch hardening/linker flags can break cxx-qt/whisper static native links.
+    unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS RUSTFLAGS CARGO_ENCODED_RUSTFLAGS
     cargo build --release --locked
 }
 
 check() {
-    cd "$pkgname-$pkgver"
+    cd "$srcdir/$pkgname-$pkgver" || return 1
+    unset CFLAGS CXXFLAGS CPPFLAGS LDFLAGS RUSTFLAGS CARGO_ENCODED_RUSTFLAGS
     cargo test --release --locked
 }
 
 package() {
-    cd "$pkgname-$pkgver"
+    cd "$srcdir/$pkgname-$pkgver" || return 1
     install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
     install -Dm644 "systemd/$pkgname.service" "$pkgdir/usr/lib/systemd/user/$pkgname.service"
     install -Dm644 "$srcdir/io.github.escucha.desktop" \
