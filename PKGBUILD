@@ -1,7 +1,7 @@
 # Maintainer: Justin <justin@example.com>
 pkgname=escucha
 pkgver=0.2.7
-pkgrel=1
+pkgrel=2
 pkgdesc="Hold-to-talk speech-to-text for Linux"
 arch=('x86_64')
 url="https://github.com/SomewhatJustin/escucha"
@@ -19,7 +19,7 @@ source=(
     "io.github.escucha.desktop"
 )
 sha256sums=('SKIP'
-            '803d4f1d1075d8ffe8cdf87c22454115f82042866daa0905396d03219b541829')
+            '393c5f8f95a744356e12c99111ef294e441214c2114697af58460f0f37d6bf6a')
 
 build() {
     cd "$srcdir/$pkgname-$pkgver" || return 1

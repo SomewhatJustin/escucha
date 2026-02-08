@@ -1,7 +1,7 @@
 pkgbase = escucha
 	pkgdesc = Hold-to-talk speech-to-text for Linux
 	pkgver = 0.2.7
-	pkgrel = 1
+	pkgrel = 2
 	url = https://github.com/SomewhatJustin/escucha
 	arch = x86_64
 	license = MIT
@@ -26,6 +26,6 @@ pkgbase = escucha
 	source = escucha-0.2.7.tar.gz::https://github.com/SomewhatJustin/escucha/archive/refs/tags/v0.2.7.tar.gz
 	source = io.github.escucha.desktop
 	sha256sums = SKIP
-	sha256sums = 803d4f1d1075d8ffe8cdf87c22454115f82042866daa0905396d03219b541829
+	sha256sums = 393c5f8f95a744356e12c99111ef294e441214c2114697af58460f0f37d6bf6a
 
 pkgname = escucha
