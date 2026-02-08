@@ -196,7 +196,18 @@ fn first_launch_onboarding(qt_thread: &cxx_qt::CxxQtThread<qobject::EscuchaBacke
     });
 
     // Best effort: make sure paste service is enabled/running up front.
-    let _ = crate::paste::ensure_ydotoold_running();
+    let paste_ready = crate::paste::ensure_ydotoold_running();
+    if !paste_ready && which::which("ydotool").is_ok() {
+        let _ = qt_thread.queue(move |mut qobject| {
+            qobject.as_mut().set_show_paste_fix_button(true);
+            qobject.as_mut().set_status_detail(QString::from(
+                "Paste service not running. Click 'Fix Paste Setup' or run: systemctl --user enable --now ydotoold.service",
+            ));
+            qobject.as_mut().error_occurred(QString::from(
+                "Automatic paste is not fully configured yet. Using clipboard fallback.",
+            ));
+        });
+    }
 
     let report = crate::preflight::check_environment();
     let input_failed = report
